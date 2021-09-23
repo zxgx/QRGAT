@@ -59,7 +59,7 @@ class Tokenizer:
 
 class QADataset:
     def __init__(self, data_path, ent2idx, rel2idx, tokenizer, batch_size, training, device,
-                 fact_dropout=0., token_path=None):
+                 fact_dropout=0., token_path=None, label_smooth=0.):
         self.ent2idx = ent2idx
         self.rel2idx = rel2idx
         self.tokenizer = tokenizer
@@ -67,9 +67,8 @@ class QADataset:
         self.training = training
         self.device = device
         self.fact_dropout = fact_dropout
-
-        if token_path is None:
-            self.reg_tokenizer = RegexpTokenizer(r'\d{1}|\w+|[^\w\s]+')
+        self.reg_tokenizer = RegexpTokenizer(r'\d{1}|\w+|[^\w\s]+') if token_path is None else None
+        self.label_smooth = label_smooth
 
         self.max_seq_len = 0
         data = self.load_data(data_path, token_path)
@@ -162,7 +161,8 @@ class QADataset:
 
             topic_ent = set([g2l[x] for x in each['topic entities']])
             for ent in topic_ent:
-                self.topic_label[i, ent] = 1
+                # self.topic_label[i, ent] = 1
+                self.topic_label[i, ent] = 1 / len(topic_ent)
 
             for g, l in g2l.items():
                 self.entity_mask[i, l] = 1
@@ -187,10 +187,14 @@ class QADataset:
                     local_answer_set.add(g2l[answer_id])
             self.answer_list[i] = list(answer_set)
 
-            for answer in local_answer_set:
-                self.answer_label[i, answer] = 1.
             if len(local_answer_set) > 0:
                 answerable += 1
+                self.answer_label[i] = np.full(
+                    self.max_local_entity, self.label_smooth/(self.max_local_entity-len(local_answer_set)), dtype=float
+                )
+                for answer in local_answer_set:
+                    # self.answer_label[i, answer] = 1.
+                    self.answer_label[i, answer] = (1-self.label_smooth) / len(local_answer_set)
 
         print("There are %d / %d answerable questions" % (answerable, len(data)))
 

@@ -123,7 +123,8 @@ class GNN(nn.Module):
 
             inter_score = self.score_func(self.linear_dropout(last_hidden)).squeeze(2)
             inter_score = inter_mask * inter_score + (1 - inter_mask) * -1e20
-            ent_label = torch.sigmoid(inter_score)
+            # ent_label = torch.sigmoid(inter_score)
+            ent_label = torch.softmax(inter_score, dim=1)
 
             inter_labels.append(ent_label)
         return inter_labels, self.ffn(hidden_state[-1])

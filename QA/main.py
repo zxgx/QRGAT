@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument('--early_stop', type=int, default=10)
     parser.add_argument('--decay_rate', type=float, default=1.0)
     parser.add_argument('--weight_decay', type=float, default=0.)
+    parser.add_argument('--label_smooth', type=float, default=0.)
 
     # Log
     parser.add_argument('--checkpoint', type=str, default=None)
@@ -52,7 +53,7 @@ def parse_args():
 
 def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop, epochs, evaluate_every, model_path):
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
-    criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
+    # criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
 
     if decay_rate >= 1.:
         scheduler = None
@@ -71,10 +72,13 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
             # batch size, max local entity
             scores = model((question, question_mask, topic_label, entity_mask, subgraph))
 
+            # smoothed cross entropy
             mask = torch.sum(answer_label, dim=1, keepdim=True)
             mask = (mask > 0.).float()
 
-            loss = criterion(scores, answer_label) * mask
+            # loss = criterion(scores, answer_label) * mask
+            scores = torch.log(torch.softmax(scores, dim=1) + 1e-20)
+            loss = -(scores * answer_label) * mask
             loss = torch.sum(loss) / loss.shape[0]
 
             optimizer.zero_grad()
