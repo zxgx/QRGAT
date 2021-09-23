@@ -6,11 +6,14 @@ from modules import Instruction, GNN, EntityInit
 
 class QAModel(nn.Module):
     def __init__(self, word_size, word_dim, hidden_dim, question_dropout, linear_dropout, num_step, relation_size,
-                 relation_dim, direction, rnn_type, num_layers):
+                 relation_dim, direction, rnn_type, num_layers, pretrained_emb):
         super(QAModel, self).__init__()
         assert direction in ('all', 'inward', 'outward')
 
-        self.word_embedding = nn.Embedding(word_size, word_dim, padding_idx=0)
+        if pretrained_emb is None:
+            self.word_embedding = nn.Embedding(word_size, word_dim, padding_idx=0)
+        else:
+            self.word_embedding = nn.Embedding.from_pretrained(pretrained_emb, padding_idx=0, freeze=False)
         self.instruction_generator = Instruction(word_dim, hidden_dim, question_dropout, linear_dropout, num_step)
         self.relation_embedding = nn.Embedding(relation_size, relation_dim)
         self.relation_linear = nn.Sequential(

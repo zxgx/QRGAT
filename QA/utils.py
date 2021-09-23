@@ -1,6 +1,7 @@
 import json
 import numpy as np
 import random
+from nltk.tokenize import RegexpTokenizer
 import torch
 
 
@@ -48,10 +49,17 @@ class Tokenizer:
     def decode(self, text):
         return ' '.join([self.idx2word[t] for t in text])
 
+    @staticmethod
+    def load_glove_emb(path):
+        pad = np.zeros(300)
+        unk = np.random.uniform(-1., 1., 300)
+        word_emb = np.load(path)
+        return np.vstack([pad, unk, word_emb])
+
 
 class QADataset:
-    def __init__(self, data_path, token_path, ent2idx, rel2idx, tokenizer, batch_size, training, device,
-                 fact_dropout=0.):
+    def __init__(self, data_path, ent2idx, rel2idx, tokenizer, batch_size, training, device,
+                 fact_dropout=0., token_path=None):
         self.ent2idx = ent2idx
         self.rel2idx = rel2idx
         self.tokenizer = tokenizer
@@ -59,6 +67,9 @@ class QADataset:
         self.training = training
         self.device = device
         self.fact_dropout = fact_dropout
+
+        if token_path is None:
+            self.reg_tokenizer = RegexpTokenizer(r'\d{1}|\w+|[^\w\s]+')
 
         self.max_seq_len = 0
         data = self.load_data(data_path, token_path)
@@ -80,13 +91,14 @@ class QADataset:
 
     def load_data(self, data_path, token_path):
         idx2question = {}
-        with open(token_path, encoding='utf-8') as f:
-            for each in f:
-                each = json.loads(each)
-                processed_question = []
-                for tok in each['dep']:
-                    processed_question.append(tok[0])
-                idx2question[each['id']] = ' '.join(processed_question)
+        if token_path is not None:
+            with open(token_path, encoding='utf-8') as f:
+                for each in f:
+                    each = json.loads(each)
+                    processed_question = []
+                    for tok in each['dep']:
+                        processed_question.append(tok[0])
+                    idx2question[each['id']] = ' '.join(processed_question)
 
         omitted, data = [], []
         with open(data_path, encoding='utf-8') as f:
@@ -97,9 +109,12 @@ class QADataset:
                     omitted.append(each['id'])
                     continue
 
-                if each['id'] not in idx2question:
-                    raise ValueError(each['id'] + 'don\'t have tokenized question!')
-                each['question'] = self.tokenizer(idx2question[each['id']])
+                if token_path is not None:
+                    if each['id'] not in idx2question:
+                        raise ValueError(each['id'] + 'don\'t have tokenized question!')
+                    each['question'] = self.tokenizer(idx2question[each['id']])
+                else:
+                    each['question'] = self.tokenizer(' '.join(self.reg_tokenizer.tokenize(each['question'].lower())))
                 self.max_seq_len = max(self.max_seq_len, len(each['question']))
 
                 data.append({

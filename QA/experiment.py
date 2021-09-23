@@ -18,6 +18,8 @@ param_config = {
     '--decay_rate': [0.5],
     '--dataset': ['webqsp'],
     '--weight_decay': [1e-5],
+    '--word_emb_path': ['word_emb.npy'],
+    # '--device': ['cpu']
 }
 
 process_str = 'python -u main.py --train --eval --batch_size 32 --epochs 200 --evaluate_every 2 --early_stop 10 --seed 1020'

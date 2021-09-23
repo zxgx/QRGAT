@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument('--direction', type=str, default='all')
     parser.add_argument('--rnn_type', type=str, default='RNN')
     parser.add_argument('--num_layers', type=int, default=1)
+    parser.add_argument('--word_emb_path', type=str, default=None)
 
     # Train & Eval
     parser.add_argument('--train', action='store_true')
@@ -188,16 +189,16 @@ def main():
 
     print("There are %d entities and %d relations" % (len(ent2idx), len(rel2idx)))
 
-    tokenizer = Tokenizer(os.path.join(dataset_dir, 'vocab_new.txt'))
+    tokenizer = Tokenizer(os.path.join(dataset_dir, 'vocab.txt'))
     print('Adopt pre-defined vocabulary of size: %d in tokenizer' % tokenizer.num_token)
 
     # QA data splits
     train_data_path = os.path.join(dataset_dir, 'train_simple.json')
-    train_token_path = os.path.join(dataset_dir, 'train.dep')
+    train_token_path = None  # os.path.join(dataset_dir, 'train.dep')
     dev_data_path = os.path.join(dataset_dir, 'dev_simple.json')
-    dev_token_path = os.path.join(dataset_dir, 'dev.dep')
+    dev_token_path = None  # os.path.join(dataset_dir, 'dev.dep')
     test_data_path = os.path.join(dataset_dir, 'test_simple.json')
-    test_token_path = os.path.join(dataset_dir, 'test.dep')
+    test_token_path = None  # os.path.join(dataset_dir, 'test.dep')
 
     train_data, dev_data, test_data = None, None, None
     device = torch.device(args.device)
@@ -218,11 +219,16 @@ def main():
             tokenizer=tokenizer, batch_size=args.batch_size, training=False, device=device,
         )
 
+    if args.word_emb_path is not None:
+        word_emb_path = os.path.join(dataset_dir, args.word_emb_path)
+        word_emb = torch.from_numpy(tokenizer.load_glove_emb(word_emb_path)).float()
+    else:
+        word_emb = None
     model = QAModel(
         word_size=tokenizer.num_token, word_dim=args.word_dim, hidden_dim=args.hidden_dim,
         question_dropout=args.question_dropout, linear_dropout=args.linear_dropout, num_step=args.num_step,
         relation_size=len(rel2idx), relation_dim=args.relation_dim, direction=args.direction, rnn_type=args.rnn_type,
-        num_layers=args.num_layers
+        num_layers=args.num_layers, pretrained_emb=word_emb
     )
     print(model)
 
