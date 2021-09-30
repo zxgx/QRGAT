@@ -86,15 +86,17 @@ if __name__ == '__main__':
     # total_dev = cwq_dev + wq_dev
     # total_test = cwq_test + wq_test
     #
-    # pickle.dump(mhqg_data, open('workspace/qg.pkl', 'wb'))
-    # pickle.dump(total_train, open('workspace/qa_train.pkl', 'wb'))
-    # pickle.dump(total_dev, open('workspace/qa_dev.pkl', 'wb'))
-    # pickle.dump(total_test, open('workspace/qa_test.pkl', 'wb'))
+    # if not os.path.exists('archive'):
+    #     os.mkdir('archive')
+    # pickle.dump(mhqg_data, open('archive/qg.pkl', 'wb'))
+    # pickle.dump(total_train, open('archive/qa_train.pkl', 'wb'))
+    # pickle.dump(total_dev, open('archive/qa_dev.pkl', 'wb'))
+    # pickle.dump(total_test, open('archive/qa_test.pkl', 'wb'))
 
-    # mhqg_data = pickle.load(open('workspace/qg.pkl', 'rb'))
-    # total_train = pickle.load(open('workspace/qa_train.pkl', 'rb'))
-    # total_dev = pickle.load(open('workspace/qa_dev.pkl', 'rb'))
-    # total_test = pickle.load(open('workspace/qa_test.pkl', 'rb'))
+    # mhqg_data = pickle.load(open('archive/qg.pkl', 'rb'))
+    # total_train = pickle.load(open('archive/qa_train.pkl', 'rb'))
+    # total_dev = pickle.load(open('archive/qa_dev.pkl', 'rb'))
+    # total_test = pickle.load(open('archive/qa_test.pkl', 'rb'))
 
     # Step 2
     # _train, _dev, _test, miss = [], [], [], []
@@ -108,7 +110,7 @@ if __name__ == '__main__':
     #         _test.append(k)
     #     else:
     #         miss.append(k)
-    #
+
     # # fuzzy match, Warning: this costs around 10 hours
     # ambiguous = []
     # for k in miss:
@@ -137,15 +139,15 @@ if __name__ == '__main__':
     #     'test': _test,
     #     'ambiguous': ambiguous
     # }
-    # pickle.dump(saved, open("workspace/splits.pkl", 'wb'))
+    # pickle.dump(saved, open("archive/splits.pkl", 'wb'))
 
-    splits = pickle.load(open('workspace/splits.pkl', 'rb'))
+    splits = pickle.load(open('archive/splits.pkl', 'rb'))
     _train = splits['train']
     _dev = splits['dev']
     _test = splits['test']
     ambiguous = splits['ambiguous']
 
-    print(len(_train), len(_dev), len(_test), len(ambiguous))
+    print(len(_train), len(_dev), len(_test), len(ambiguous))  # 17221, 1981, 2945, 842
 
     # Step 3
     raw = {}
@@ -163,6 +165,6 @@ if __name__ == '__main__':
             for each in split:
                 f.write(json.dumps(each) + '\n')
 
-    dump('workspace/train.txt', train_split)
-    dump('workspace/dev.txt', dev_split)
-    dump('workspace/test.txt', test_split)
+    dump('qg_train.json', train_split)
+    dump('qg_dev.json', dev_split)
+    dump('qg_test.json', test_split)

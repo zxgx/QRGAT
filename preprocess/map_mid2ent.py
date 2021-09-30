@@ -14,7 +14,7 @@ with open('webqsp/entities.txt') as f:
         if line not in ent_pool:
             ent_pool[line] = None
 
-fb = open('workspace/mid2name.txt', encoding='utf-8')
+fb = open('mid2name.txt', encoding='utf-8')
 for line in fb:
     line = json.loads(line)
     for k in line:
