@@ -70,7 +70,7 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
             data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
 
             # batch size, max local entity
-            scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+            _, scores = model((question, question_mask, topic_label, entity_mask, subgraph))
 
             # smoothed cross entropy
             mask = torch.sum(answer_label, dim=1, keepdim=True)
@@ -120,7 +120,7 @@ def evaluate(model, data_loader, eps=0.95):
             data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
 
             # batch size, max local entity
-            scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+            _, scores = model((question, question_mask, topic_label, entity_mask, subgraph))
 
             predict_dist = torch.softmax(scores, dim=1)
 

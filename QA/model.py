@@ -52,4 +52,4 @@ class QAModel(nn.Module):
             instructions, entity_emb, fact_relations, topic_label, entity_mask, batch_ids, head2edge, tail2edge
         )
         predict_scores = entity_mask * question.matmul(entity_emb.transpose(1, 2)).squeeze(1) + (1 - entity_mask) * -1e20
-        return predict_scores
+        return inter_labels, predict_scores
