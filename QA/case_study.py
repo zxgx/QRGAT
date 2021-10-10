@@ -155,8 +155,10 @@ def main():
                     cur_hit = True
                     hits += 1
                 elif len(ans_retrieved) > 0 and ans_retrieved[0][0] in a_list:
-                    cur_hit = False
+                    cur_hit = True
                     hits += 1
+                else:
+                    cur_hit = False
 
                 log_f = correct_f if cur_hit else wrong_f
                 log_f.write('ID: ' + d_id + '\n')
