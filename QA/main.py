@@ -30,6 +30,8 @@ def parse_args():
     parser.add_argument('--rnn_type', type=str, default='RNN')
     parser.add_argument('--num_layers', type=int, default=1)
     parser.add_argument('--word_emb_path', type=str, default=None)
+    parser.add_argument('--kge_func', type=str, default='ComplEx')
+    parser.add_argument('--kge_weight', type=float, default=1e-3)
 
     # Train & Eval
     parser.add_argument('--train', action='store_true')
@@ -51,7 +53,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop, epochs, evaluate_every, model_path):
+def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop, epochs, evaluate_every, model_path,
+          kge_weight):
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
     # criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
 
@@ -65,12 +68,12 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
     best_hit1, best_f1, best_model, stop_increase = 0., 0., model.state_dict(), 0
     for epoch in range(epochs):
         model.train()
-        st, tot_loss = time.time(), 0.
+        st, tot_loss, tot_kge_loss = time.time(), 0., 0.
         for batch in train_data.batching():
             data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
 
             # batch size, max local entity
-            _, scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+            _, scores, kge_loss = model((question, question_mask, topic_label, entity_mask, subgraph))
 
             # smoothed cross entropy
             mask = torch.sum(answer_label, dim=1, keepdim=True)
@@ -81,15 +84,21 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
             loss = -(scores * answer_label) * mask
             loss = torch.sum(loss) / loss.shape[0]
 
+            for each in kge_loss:
+                loss += kge_weight * each
+
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
             optimizer.step()
-            tot_loss += loss.item()
 
-        print('Epoch: %d / %d | Training loss: %.4f ' % (epoch+1, epochs, tot_loss), end='')
+            tot_loss += loss.item()
+            tot_kge_loss += kge_loss[0].item()
+
+        print('Epoch: %d / %d | Training loss: %.4f, kge loss: %.4f ' %
+              (epoch+1, epochs, tot_loss, tot_kge_loss), end='')
         if (epoch+1) % evaluate_every == 0:
-            hit1, _, _, f1 = evaluate(model, dev_data)
+            hit1, _, _, f1, eval_kge_loss = evaluate(model, dev_data)
             if hit1 > best_hit1:
                 best_hit1, best_model = hit1, model.state_dict()
                 stop_increase = 0
@@ -97,7 +106,8 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
                 stop_increase += 1
             if f1 > best_f1:
                 best_f1 = f1
-            print('| Develop hit@1: %.4f / %.4f, f1: %.4f / %.4f ' % (hit1, best_hit1, f1, best_f1), end='')
+            print('| Develop hit@1: %.4f / %.4f, f1: %.4f / %.4f, kge loss: %.4f' %
+                  (hit1, best_hit1, f1, best_f1, eval_kge_loss), end='')
             if scheduler is not None:
                 scheduler.step(hit1)
         print('| Time Cost: %.2fs' % (time.time() - st), end='\n' + '=' * 40 + '\n')
@@ -114,14 +124,15 @@ def evaluate(model, data_loader, eps=0.95):
     model.eval()
     ignore_prob = (1 - eps) / data_loader.max_local_entity
     hits, hits5, hits10, f1s = 0., 0., 0., 0.
+    tot_kge_loss = 0.
 
     with torch.no_grad():
         for batch in data_loader.batching():
             data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
 
             # batch size, max local entity
-            _, scores = model((question, question_mask, topic_label, entity_mask, subgraph))
-
+            _, scores, kge_loss = model((question, question_mask, topic_label, entity_mask, subgraph))
+            tot_kge_loss += kge_loss[0].item()
             predict_dist = torch.softmax(scores, dim=1)
 
             for d_id, pred_dist, _q, t_dist, a_list in zip(data_id, predict_dist, question, topic_label, answer_list):
@@ -166,7 +177,7 @@ def evaluate(model, data_loader, eps=0.95):
     hits5 /= data_loader.num_data
     hits10 /= data_loader.num_data
     f1s /= data_loader.num_data
-    return hits, hits5, hits10, f1s
+    return hits, hits5, hits10, f1s, tot_kge_loss
 
 
 def main():
@@ -232,7 +243,7 @@ def main():
         word_size=tokenizer.num_token, word_dim=args.word_dim, hidden_dim=args.hidden_dim,
         question_dropout=args.question_dropout, linear_dropout=args.linear_dropout, num_step=args.num_step,
         relation_size=len(rel2idx), relation_dim=args.relation_dim, direction=args.direction, rnn_type=args.rnn_type,
-        num_layers=args.num_layers, pretrained_emb=word_emb
+        num_layers=args.num_layers, pretrained_emb=word_emb, kge_f=args.kge_func
     )
     print(model)
 
@@ -255,12 +266,13 @@ def main():
         print('Model will be saved to', model_path)
         train(
             train_data, dev_data, model, lr=args.lr, weight_decay=args.weight_decay, decay_rate=args.decay_rate,
-            early_stop=args.early_stop, epochs=args.epochs, evaluate_every=args.evaluate_every, model_path=model_path
+            early_stop=args.early_stop, epochs=args.epochs, evaluate_every=args.evaluate_every, model_path=model_path,
+            kge_weight=args.kge_weight
         )
         model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     if args.eval:
-        hits1, hits5, hits10, f1 = evaluate(model, test_data)
+        hits1, hits5, hits10, f1, _ = evaluate(model, test_data)
         print("Test hits@1: %.4f, hits@5: %.4f, hits@10: %.4f, f1: %.4f" % (hits1, hits5, hits10, f1))
 
 
