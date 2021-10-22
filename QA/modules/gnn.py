@@ -37,6 +37,7 @@ class GNN(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
         self.layer_norm = nn.LayerNorm(layer_dim)
+        self.ent_linear = nn.Linear(layer_dim+hidden_dim, hidden_dim)
 
         self.linear_dropout = nn.Dropout(dropout)
         self.score_func = nn.Linear(layer_dim, 1)
@@ -80,16 +81,28 @@ class GNN(nn.Module):
             else:
                 # fact size, 1
                 outward_prior = torch.sparse.mm(head2edge, ent_label.view(-1, 1))
+
+                # fact size, hidden dim * num dir
+                outward_ent = torch.sparse.mm(head2edge, hidden_state[-1].view(batch_size * max_local_entity, -1))
+                # fact size, hidden dim * (num dir + 1)
+                outward_rel_ent = self.ent_linear(torch.cat([fact_x, outward_ent], dim=1))
+
                 # batch size, max local entity, hidden dim
-                outward_neighbor = torch.sparse.mm(edge2tail, outward_prior * fact_x).view(
+                outward_neighbor = torch.sparse.mm(edge2tail, outward_prior * outward_rel_ent).view(
                     batch_size, max_local_entity, -1)
                 # batch size * max local entity, 1
                 outward_mask = torch.sparse.mm(edge2tail, outward_prior)
 
                 # fact size, 1
                 inward_prior = torch.sparse.mm(tail2edge, ent_label.view(-1, 1))
+
+                # fact size, hidden dim * num dir
+                inward_ent = torch.sparse.mm(tail2edge, hidden_state[-1].view(batch_size * max_local_entity, -1))
+                # fact size, hidden dim * (num dir + 1)
+                inward_rel_ent = self.ent_linear(torch.cat([fact_x, inward_ent], dim=1))
+
                 # batch size, max local entity, hidden dim
-                inward_neighbor = torch.sparse.mm(edge2head, inward_prior * fact_x).view(
+                inward_neighbor = torch.sparse.mm(edge2head, inward_prior * inward_rel_ent).view(
                     batch_size, max_local_entity, -1)
                 # batch size * max local entity, 1
                 inward_mask = torch.sparse.mm(edge2head, inward_prior)
