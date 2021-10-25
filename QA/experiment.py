@@ -20,11 +20,13 @@ param_config = {
     '--weight_decay': [1e-5],
     '--word_emb_path': ['word_emb.npy'],
     '--label_smooth': [0.2],
-    '--kge_func': ['DistMult', 'ComplEx'],
+    '--kge_func': ['ComplEx'],
     '--kge_weight': [1., 1e-3, 1e-6]
+    # '--kge_func': ['DistMult'],
+    # '--kge_weight': [1e-3]
 }
 
-process_str = 'python -u main.py --train --eval --batch_size 32 --epochs 200 --evaluate_every 2 --early_stop 10 --seed 1020'
+process_str = 'python -u main.py --train --eval --batch_size 24 --epochs 200 --evaluate_every 2 --early_stop 10 --seed 1020'
 
 possible_param_list = list(ParameterGrid(param_config))
 print(f'There will be {len(possible_param_list)} runs')
