@@ -1,3 +1,3 @@
 from .instruction import Instruction
-from .gnn import GNN
+from .nsm import NSM
 from .entity_encoder import EntityInit

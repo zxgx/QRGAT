@@ -4,9 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 
 
-class GNN(nn.Module):
+class NSM(nn.Module):
     def __init__(self, direction, num_layers, num_step, hidden_dim, rnn_type, dropout, kge_f):
-        super(GNN, self).__init__()
+        super(NSM, self).__init__()
 
         self.direction = direction
         self.num_layers = num_layers

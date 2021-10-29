@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from modules import Instruction, GNN, EntityInit
+from modules import Instruction, NSM, EntityInit
 
 
 class QAModel(nn.Module):
@@ -22,7 +22,7 @@ class QAModel(nn.Module):
         )
         self.entity_encoder = EntityInit(hidden_dim, direction)
         # direction, num_layers, num_step, hidden_dim, rnn_type, dropout
-        self.gnn = GNN(direction, num_layers, num_step, hidden_dim, rnn_type, linear_dropout, kge_f)
+        self.nsm = NSM(direction, num_layers, num_step, hidden_dim, rnn_type, linear_dropout, kge_f)
 
     def forward(self, batch):
         question, question_mask, topic_label, entity_mask, subgraph = batch
@@ -48,7 +48,7 @@ class QAModel(nn.Module):
 
         # [ batch size, max local entity ]
         # batch size, max local entity, hidden dim
-        inter_labels, entity_emb, kge_loss = self.gnn(
+        inter_labels, entity_emb, kge_loss = self.nsm(
             instructions, entity_emb, fact_relations, topic_label, entity_mask, batch_ids, head2edge, tail2edge
         )
         predict_scores = entity_mask * question.matmul(entity_emb.transpose(1, 2)).squeeze(1) + (1 - entity_mask) * -1e20
