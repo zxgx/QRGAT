@@ -1,3 +1,4 @@
 from .instruction import Instruction
-from .gnn import GNN
+from .gat import GATLayer
+from .nsm import NSM
 from .entity_encoder import EntityInit

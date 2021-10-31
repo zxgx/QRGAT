@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 
-class GNN(nn.Module):
-    def __init__(self, direction, num_layers, num_step, hidden_dim, rnn_type, dropout):
-        super(GNN, self).__init__()
+class NSM(nn.Module):
+    def __init__(self, direction, num_layers, num_step, hidden_dim, rnn_type, dropout, kge_f):
+        super(NSM, self).__init__()
 
         self.direction = direction
         self.num_layers = num_layers
@@ -28,6 +29,21 @@ class GNN(nn.Module):
             raise ValueError('Unknown RNN type: ' + rnn_type)
 
         layer_dim = hidden_dim * 2 if direction == 'all' else hidden_dim
+        self.relation_linear = nn.Linear(hidden_dim, layer_dim)
+        if kge_f == 'DistMult':
+            self.outward_kge = self.DistMult_outward
+            self.inward_kge = self.DistMult_inward
+        elif kge_f == 'ComplEx':
+            self.outward_kge = self.ComplEx_outward
+            self.inward_kge = self.ComplEx_inward
+        elif kge_f == 'TuckER':
+            self.W = nn.Parameter(torch.from_numpy(np.random.uniform(-1, 1, (layer_dim, layer_dim, layer_dim))))
+            self.outward_kge = self.TuckER
+        elif kge_f == 'RotatE':
+            self.outward_kge = self.RotatE
+        else:
+            raise ValueError('Unknown KGE func: ' + kge_f)
+
         for layer in range(num_layers):
             ih_name, hh_name = 'weight_ih_l{}'.format(layer), 'weight_hh_l{}'.format(layer)
             setattr(self, ih_name, nn.Linear(layer_dim, layer_dim * self.num_chunks, bias=False))
@@ -36,6 +52,7 @@ class GNN(nn.Module):
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
+        self.bce = nn.BCEWithLogitsLoss()
         self.layer_norm = nn.LayerNorm(layer_dim)
 
         self.linear_dropout = nn.Dropout(dropout)
@@ -52,6 +69,12 @@ class GNN(nn.Module):
         # num layers, batch size, max local entity, hidden dim * num direction
         init_state = torch.stack([entity_emb] * self.num_layers, dim=0)
         hidden_state, cell_state = init_state, init_state
+
+        # fact size, 1
+        init_outward_score = torch.sigmoid(self.outward_kge(entity_emb, head2edge, tail2edge, fact_relations)) + 1e-20
+        init_inward_score = torch.sigmoid(self.inward_kge(entity_emb, head2edge, tail2edge, fact_relations)) + 1e-20
+        init_kge_loss = torch.mean(-torch.log(init_outward_score)) + torch.mean(-torch.log(init_inward_score))
+        kge_loss = [init_kge_loss]
 
         ent_label, inter_labels = topic_label, []
         for i in range(self.num_step):
@@ -80,24 +103,33 @@ class GNN(nn.Module):
             else:
                 # fact size, 1
                 outward_prior = torch.sparse.mm(head2edge, ent_label.view(-1, 1))
+                outward_support_score = self.outward_kge(hidden_state[-1], head2edge, tail2edge, fact_x)
+
                 # batch size, max local entity, hidden dim
                 outward_neighbor = torch.sparse.mm(edge2tail, outward_prior * fact_x).view(
                     batch_size, max_local_entity, -1)
                 # batch size * max local entity, 1
                 outward_mask = torch.sparse.mm(edge2tail, outward_prior)
 
+                outward_kge_loss = torch.mean(-torch.log(torch.sigmoid(outward_support_score) + 1e-20))
+
                 # fact size, 1
                 inward_prior = torch.sparse.mm(tail2edge, ent_label.view(-1, 1))
+                inward_support_score = self.inward_kge(hidden_state[-1], head2edge, tail2edge, fact_x)
+
                 # batch size, max local entity, hidden dim
                 inward_neighbor = torch.sparse.mm(edge2head, inward_prior * fact_x).view(
                     batch_size, max_local_entity, -1)
                 # batch size * max local entity, 1
                 inward_mask = torch.sparse.mm(edge2head, inward_prior)
 
+                inward_kge_loss = torch.mean(-torch.log(torch.sigmoid(inward_support_score)+1e-20))
+
                 # batch size, max local entity, hidden dim * 2
                 neighbor = torch.cat([outward_neighbor, inward_neighbor], dim=2)
                 # batch size * max local entity, 1
                 inter_mask = outward_mask + inward_mask
+                kge_loss.append(outward_kge_loss + inward_kge_loss)
 
             last_hidden = self.layer_norm(neighbor)
             hidden_splits, cell_splits = [], []
@@ -127,7 +159,7 @@ class GNN(nn.Module):
             ent_label = torch.softmax(inter_score, dim=1)
 
             inter_labels.append(ent_label)
-        return inter_labels, self.ffn(hidden_state[-1])
+        return inter_labels, self.ffn(hidden_state[-1]), kge_loss
 
     def rnn_step(self, x, hidden_state, cell_state, weight_ih, weight_hh):
         op = getattr(self, self.operations[0])
@@ -171,3 +203,115 @@ class GNN(nn.Module):
         hidden_state = output_message * self.tanh(cell_state)
 
         return hidden_state, cell_state
+
+    def DistMult_outward(self, ent, head2edge, tail2edge, relation):
+        batch_size, max_local_ent, ent_dim = ent.shape[:]
+        # fact size, ent dim
+        head = torch.sparse.mm(head2edge, ent.view(batch_size * max_local_ent, -1))
+        tail = torch.sparse.mm(tail2edge, ent.view(batch_size * max_local_ent, -1))
+        # fact size, relation dim
+        relation = self.relation_linear(relation)
+        relation_dim = relation.shape[1]
+        assert ent_dim == relation_dim
+
+        pred = head * relation
+
+        score = torch.sum(pred * tail, dim=1, keepdim=True)  # fact size, 1
+        return score
+
+    def DistMult_inward(self, ent, head2edge, tail2edge, relation):
+        batch_size, max_local_ent, ent_dim = ent.shape[:]
+        # fact size, ent dim
+        head = torch.sparse.mm(head2edge, ent.view(batch_size * max_local_ent, -1))
+        tail = torch.sparse.mm(tail2edge, ent.view(batch_size * max_local_ent, -1))
+        # fact size, relation dim
+        relation = self.relation_linear(relation)
+        relation_dim = relation.shape[1]
+        assert ent_dim == relation_dim
+
+        pred = relation * tail
+        score = torch.sum(pred * head, dim=1, keepdim=True)  # fact size, 1
+        return score
+
+    def ComplEx_outward(self, ent, head2edge, tail2edge, relation):
+        batch_size, max_local_ent, ent_dim = ent.shape[:]
+        # fact size, ent dim
+        head = torch.sparse.mm(head2edge, ent.view(batch_size * max_local_ent, -1))
+        tail = torch.sparse.mm(tail2edge, ent.view(batch_size * max_local_ent, -1))
+        # fact size, relation dim
+        relation = self.relation_linear(relation)
+        relation_dim = relation.shape[1]
+        assert ent_dim == relation_dim and ent_dim % 2 == 0
+
+        head_re, head_im = torch.chunk(head, 2, dim=1)
+        relation_re, relation_im = torch.chunk(relation, 2, dim=1)
+
+        pred_re = head_re * relation_re - head_im * relation_im
+        pred_im = head_re * relation_im + head_im * relation_re
+        pred = torch.cat([pred_re, pred_im], dim=1)
+
+        score = torch.sum(pred * tail, dim=1, keepdim=True)  # fact size, 1
+        return score
+
+    def ComplEx_inward(self, ent, head2edge, tail2edge, relation):
+        batch_size, max_local_ent, ent_dim = ent.shape[:]
+        # fact size, ent dim
+        head = torch.sparse.mm(head2edge, ent.view(batch_size * max_local_ent, -1))
+        tail = torch.sparse.mm(tail2edge, ent.view(batch_size * max_local_ent, -1))
+        # fact size, relation dim
+        relation = self.relation_linear(relation)
+        relation_dim = relation.shape[1]
+        assert ent_dim == relation_dim and ent_dim % 2 == 0
+
+        tail_re, tail_im = torch.chunk(tail, 2, dim=1)
+        relation_re, relation_im = torch.chunk(relation, 2, dim=1)
+
+        pred_re = relation_re * tail_re + relation_im * tail_im
+        pred_im = relation_re * tail_im - relation_im * tail_re
+        pred = torch.cat([pred_re, pred_im], dim=1)
+
+        score = torch.sum(pred * head, dim=1, keepdim=True)  # fact size, 1
+        return score
+
+    def TuckER(self, ent, head2edge, tail2edge, relation, mask=None):
+        batch_size, max_local_ent, ent_dim = ent.shape[:]
+        # fact size, ent dim
+        head = torch.sparse.mm(head2edge, ent.view(batch_size * max_local_ent, -1))
+        tail = torch.sparse.mm(tail2edge, ent.view(batch_size * max_local_ent, -1))
+        # fact size, relation dim
+        relation = self.relation_linear(relation)
+        relation_dim = relation.shape[1]
+        assert ent_dim == relation_dim
+
+        head = head.unsqueeze(1)  # fact size, 1, ent dim
+        W_mat = torch.mm(relation, self.W.view(relation_dim, -1)).view(-1, ent_dim, ent_dim)  # fact size, ent dim, ent dim
+        pred = torch.bmm(head, W_mat).squeeze(1)  # fact size, ent dim
+
+        score = torch.sum(pred * tail, dim=1, keepdim=True)  # fact size, 1
+        return score
+
+    def RotatE(self, ent, head2edge, tail2edge, relation, mask=None):
+        batch_size, max_local_ent, ent_dim = ent.shape[:]
+        relation_dim = relation.shape[1]
+        assert ent_dim % 2 == 0 and ent_dim // 2 == relation_dim
+
+        # fact size, ent dim
+        head = torch.sparse.mm(head2edge, ent.view(batch_size * max_local_ent, -1))
+        tail = torch.sparse.mm(tail2edge, ent.view(batch_size * max_local_ent, -1))
+
+        pi = 3.14159265358979323846
+        head_re, head_im = torch.chunk(head, 2, dim=1)
+        tail_re, tail_im = torch.chunk(tail, 2, dim=1)
+
+        phase_relation = relation / (1 / ent_dim / pi)
+        relation_re, relation_im = torch.cos(phase_relation), torch.sin(phase_relation)
+
+        pred_re = head_re * relation_re - head_im * relation_im
+        pred_im = head_re * relation_im + head_im * relation_re
+
+        score = torch.cat([pred_re - tail_re, pred_im - tail_im], dim=1).norm(dim=0)
+
+        if mask is not None:
+            score *= mask
+
+        return score

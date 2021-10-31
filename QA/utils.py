@@ -232,7 +232,6 @@ class QADataset:
         subgraph = self.subgraph[batch_indices]
 
         for i, (head_list, rel_list, tail_list) in enumerate(subgraph):
-            g2l = self.global2local_maps[data_id[i]]
             offset = i * self.max_local_entity
 
             fact_size = len(head_list)
@@ -251,16 +250,6 @@ class QADataset:
         batch_ids = torch.from_numpy(batch_ids).long().to(self.device)
         batch_relations = torch.from_numpy(batch_relations).long().to(self.device)
 
-        fact_ids = np.array(range(len(batch_heads)), dtype=int)
-        values = torch.ones(batch_ids.shape[0], dtype=torch.float)
-        batch_size, fact_size = len(batch_indices), fact_ids.shape[0]
-
-        head2edge_idx = torch.tensor([fact_ids, batch_heads], dtype=torch.long)
-        head2edge = torch.sparse.FloatTensor(head2edge_idx, values,
-                                             (fact_size, batch_size * self.max_local_entity)).to(self.device)
-
-        tail2edge_idx = torch.tensor([fact_ids, batch_tails], dtype=torch.long)
-        tail2edge = torch.sparse.FloatTensor(tail2edge_idx, values,
-                                             (fact_size, batch_size * self.max_local_entity)).to(self.device)
-
-        return batch_ids, batch_relations, head2edge, tail2edge
+        edge_index = np.vstack([batch_heads, batch_tails])
+        edge_index = torch.from_numpy(edge_index).to(self.device)
+        return batch_ids, batch_relations, edge_index
