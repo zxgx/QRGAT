@@ -1,5 +1,8 @@
 """
     Inspired by https://github.com/gordicaleksa/pytorch-GAT
+
+    Combining index_select with Tensor.scatter_add_ is more efficient than sparse matrix multiplication when
+    implementing graphical softmax and aggregation
 """
 import torch
 import torch.nn as nn
@@ -73,6 +76,7 @@ class GATLayer(torch.nn.Module):
         self.attention_weights = None  # for later visualization purposes, I cache the weights here
 
         self.init_params()
+        self.layer_norm = nn.LayerNorm(num_out_features * (num_of_heads if concat else 1))
 
     def init_params(self):
         """
@@ -200,7 +204,7 @@ class GATLayer(torch.nn.Module):
         #
 
         out_nodes_features = self.skip_concat_bias(attentions_per_edge, in_nodes_features, out_nodes_features)
-        return out_nodes_features
+        return self.layer_norm(out_nodes_features)
 
     #
     # Helper functions (without comments there is very little code so don't be scared!)

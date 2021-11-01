@@ -6,7 +6,8 @@ from modules import Instruction, EntityInit, GATLayer, NSM
 
 class QAModel(nn.Module):
     def __init__(self, word_size, word_dim, hidden_dim, question_dropout, linear_dropout, num_step, pretrained_emb,
-                 relation_size, relation_dim, direction, gat_head_dim, gat_head_size, gat_dropout, gat_skip, gat_bias):
+                 relation_size, relation_dim, pretrained_relation, direction, gat_head_dim, gat_head_size, gat_dropout,
+                 gat_skip, gat_bias):
         super(QAModel, self).__init__()
         assert direction in ('all', 'inward', 'outward')
         self.num_step = num_step
@@ -24,7 +25,10 @@ class QAModel(nn.Module):
         #
         # Relation Embedding & Entity Encoder
         #
-        self.relation_embedding = nn.Embedding(relation_size, relation_dim)
+        if pretrained_relation is None:
+            self.relation_embedding = nn.Embedding(relation_size, relation_dim)
+        else:
+            self.relation_embedding = nn.Embedding.from_pretrained(pretrained_relation, freeze=False)
         self.entity_encoder = EntityInit(relation_dim, hidden_dim, direction)
 
         #

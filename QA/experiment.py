@@ -15,10 +15,10 @@ param_config = {
     '--direction': ['all'],
     '--word_emb_path': ['word_emb.npy'],
 
-    '--gat_head_dim': [16],
+    '--gat_head_dim': [25],
     '--gat_head_size': [8],
-    '--gat_dropout': [0.2],
-    # '': ['--gat_skip'],
+    '--gat_dropout': [0.0],
+    '': ['--gat_skip'],
 
     '--lr': [5e-4],
     '--decay_rate': [0.1],

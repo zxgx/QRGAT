@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument('--relation_dim', type=int, default=200)
     parser.add_argument('--direction', type=str, default='all')
     parser.add_argument('--word_emb_path', type=str, default=None)
+    parser.add_argument('--relation_emb_path', type=str, default=None)
 
     parser.add_argument('--gat_head_dim', type=int, default=25)
     parser.add_argument('--gat_head_size', type=int, default=8)
@@ -237,12 +238,18 @@ def main():
     else:
         word_emb = None
 
+    if args.relation_emb_path is not None:
+        rel_emb = os.path.join(dataset_dir, args.relation_emb_path)
+        rel_emb = torch.from_numpy(np.load(rel_emb)).float()
+    else:
+        rel_emb = None
+
     model = QAModel(
         word_size=tokenizer.num_token, word_dim=args.word_dim, hidden_dim=args.hidden_dim,
         question_dropout=args.question_dropout, linear_dropout=args.linear_dropout, num_step=args.num_step,
-        pretrained_emb=word_emb, relation_size=len(rel2idx), relation_dim=args.relation_dim, direction=args.direction,
-        gat_head_dim=args.gat_head_dim, gat_head_size=args.gat_head_size, gat_dropout=args.gat_dropout,
-        gat_skip=args.gat_skip, gat_bias=args.gat_bias,
+        pretrained_emb=word_emb, relation_size=len(rel2idx), relation_dim=args.relation_dim,
+        pretrained_relation=rel_emb, direction=args.direction, gat_head_dim=args.gat_head_dim,
+        gat_head_size=args.gat_head_size,  gat_dropout=args.gat_dropout, gat_skip=args.gat_skip, gat_bias=args.gat_bias,
     )
     print(model)
 
