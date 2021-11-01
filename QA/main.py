@@ -205,6 +205,7 @@ def main():
 
     # QA data splits
     train_data_path = os.path.join(dataset_dir, 'train_simple.json')
+    # train_data_path = os.path.join(dataset_dir, 'train_small.json')
     train_token_path = None  # os.path.join(dataset_dir, 'train.dep')
     dev_data_path = os.path.join(dataset_dir, 'dev_simple.json')
     dev_token_path = None  # os.path.join(dataset_dir, 'dev.dep')
@@ -260,6 +261,36 @@ def main():
 
     print('Initialization finished, time cost: %.2f' % (time.time() - start_time))
 
+    ######################### Sanity Check #####################################
+    # optimizer = torch.optim.Adam(
+    #     filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
+    # model.train()
+    # for e in range(50):
+    #     tot_loss = 0.
+    #     for batch in train_data.batching():
+    #         data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
+    #
+    #         # batch size, max local entity
+    #         scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+    #
+    #         # smoothed cross entropy
+    #         mask = torch.sum(answer_label, dim=1, keepdim=True)
+    #         mask = (mask > 0.).float()
+    #
+    #         # loss = criterion(scores, answer_label) * mask
+    #         scores = torch.log(torch.softmax(scores, dim=1) + 1e-20)
+    #         loss = -(scores * answer_label) * mask
+    #         loss = torch.sum(loss) / loss.shape[0]
+    #
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
+    #         optimizer.step()
+    #
+    #         tot_loss += loss.item()
+    #     print("Epoch: %d, Loss: %.4f" % (e+1, tot_loss))
+    # exit(0)
+    ##############################################################################
     if args.train:
         print('Model will be saved to', model_path)
         train(

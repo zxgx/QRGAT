@@ -15,9 +15,9 @@ param_config = {
     '--direction': ['all'],
     '--word_emb_path': ['word_emb.npy'],
 
-    '--gat_head_dim': [25],
+    '--gat_head_dim': [16],
     '--gat_head_size': [8],
-    '--gat_dropout': [0.6],
+    '--gat_dropout': [0.2],
     # '': ['--gat_skip'],
 
     '--lr': [5e-4],
@@ -39,4 +39,4 @@ for i, param in enumerate(possible_param_list):
         run_str += f' {arg} {arg_val}'
 
     print(run_str)
-    # process = subprocess.run(run_str.split(), encoding='UTF-8')
+    process = subprocess.run(run_str.split(), encoding='UTF-8')

@@ -13,7 +13,7 @@ class GATLayer(torch.nn.Module):
     nodes_dim = 0      # node dimension/axis
     head_dim = 1       # attention head dimension/axis
 
-    def __init__(self, num_in_features, num_out_features, num_of_heads, concat=True, activation=nn.ELU(),
+    def __init__(self, num_in_features, num_out_features, num_of_heads, edge_dim, hidden_dim, concat, activation,
                  dropout_prob=0.6, add_skip_connection=True, bias=True, log_attention_weights=False):
 
         super().__init__()
@@ -31,14 +31,19 @@ class GATLayer(torch.nn.Module):
 
         # You can treat this one matrix as num_of_heads independent W matrices
         self.linear_proj = nn.Linear(num_in_features, num_of_heads * num_out_features, bias=False)
+        self.linear_edge_proj = nn.Linear(edge_dim, num_of_heads * num_out_features, bias=False)
 
         # After we concatenate target node (node i) and source node (node j) we apply the additive scoring function
         # which gives us un-normalized score "e". Here we split the "a" vector - but the semantics remain the same.
 
         # Basically instead of doing [x, y] (concatenation, x/y are node feature vectors) and dot product with "a"
         # we instead do a dot product between x and "a_left" and y and "a_right" and we sum them up
+        self.target_instruction = nn.Linear(hidden_dim, num_of_heads * num_out_features)
+        self.source_instruction = nn.Linear(hidden_dim, num_of_heads * num_out_features)
+        self.edge_instruction = nn.Linear(hidden_dim, num_of_heads * num_out_features)
         self.scoring_fn_target = nn.Parameter(torch.Tensor(1, num_of_heads, num_out_features))
         self.scoring_fn_source = nn.Parameter(torch.Tensor(1, num_of_heads, num_out_features))
+        self.scoring_fn_edge = nn.Parameter(torch.Tensor(1, num_of_heads, num_out_features))
 
         # Bias is definitely not crucial to GAT - feel free to experiment (I pinged the main author, Petar, on this one)
         if bias and concat:
@@ -77,10 +82,16 @@ class GATLayer(torch.nn.Module):
         The original repo was developed in TensorFlow (TF) and they used the default initialization.
         Feel free to experiment - there may be better initializations depending on your problem.
 
+        APPEND NOTE: xavier uniform initialization is important to avoid overflow when computing edge scores
         """
         nn.init.xavier_uniform_(self.linear_proj.weight)
         nn.init.xavier_uniform_(self.scoring_fn_target)
         nn.init.xavier_uniform_(self.scoring_fn_source)
+        nn.init.xavier_uniform_(self.linear_edge_proj.weight)
+        nn.init.xavier_uniform_(self.source_instruction.weight)
+        nn.init.xavier_uniform_(self.target_instruction.weight)
+        nn.init.xavier_uniform_(self.edge_instruction.weight)
+        nn.init.xavier_uniform_(self.scoring_fn_edge)
 
         if self.bias is not None:
             torch.nn.init.zeros_(self.bias)
@@ -116,7 +127,7 @@ class GATLayer(torch.nn.Module):
 
         return out_nodes_features if self.activation is None else self.activation(out_nodes_features)
 
-    def forward(self, in_nodes_features, edge_index):
+    def forward(self, in_nodes_features, edge_index, edges, instructions, batch_ids, max_local_entity):
         """
         in_nodes_features: [ batch size, feature dim ]
         edge_index: [ 2, edge size ]
@@ -139,22 +150,33 @@ class GATLayer(torch.nn.Module):
 
         nodes_features_proj = self.dropout(nodes_features_proj)  # in the official GAT imp they did dropout here as well
 
+        # E, NH, FOUT
+        edges_proj = self.dropout(self.linear_edge_proj(edges).view(-1, self.num_of_heads, self.num_out_features))
+
         #
         # Step 2: Edge attention calculation
         #
+        # N, NH, FOUT
+        source_bridge = self.source_instruction(instructions).unsqueeze(1).expand(-1, max_local_entity, -1)
+        source_bridge = source_bridge.contiguous().view(-1, self.num_of_heads, self.num_out_features)
+        target_bridge = self.target_instruction(instructions).unsqueeze(1).expand(-1, max_local_entity, -1)
+        target_bridge = target_bridge.contiguous().view(-1, self.num_of_heads, self.num_out_features)
+        # E, NH, FOUT
+        edge_bridge = self.edge_instruction(instructions).index_select(0, batch_ids).view(-1, self.num_of_heads, self.num_out_features)
 
         # Apply the scoring function (* represents element-wise (a.k.a. Hadamard) product)
         # shape = (N, NH, FOUT) * (1, NH, FOUT) -> (N, NH, 1) -> (N, NH) because sum squeezes the last dimension
         # Optimization note: torch.sum() is as performant as .sum() in my experiments
-        scores_source = (nodes_features_proj * self.scoring_fn_source).sum(dim=-1)
-        scores_target = (nodes_features_proj * self.scoring_fn_target).sum(dim=-1)
+        scores_source = (nodes_features_proj * self.scoring_fn_source * source_bridge).sum(dim=-1)
+        scores_target = (nodes_features_proj * self.scoring_fn_target * target_bridge).sum(dim=-1)
+        scores_edge = (edges_proj * self.scoring_fn_edge * edge_bridge).sum(dim=-1)
 
         # We simply copy (lift) the scores for source/target nodes based on the edge index. Instead of preparing all
         # the possible combinations of scores we just prepare those that will actually be used and those are defined
         # by the edge index.
         # scores shape = (E, NH), nodes_features_proj_lifted shape = (E, NH, FOUT), E - number of edges in the graph
         scores_source_lifted, scores_target_lifted, nodes_features_proj_lifted = self.lift(scores_source, scores_target, nodes_features_proj, edge_index)
-        scores_per_edge = self.leakyReLU(scores_source_lifted + scores_target_lifted)
+        scores_per_edge = self.leakyReLU(scores_source_lifted + scores_target_lifted + scores_edge)
 
         # shape = (E, NH, 1)
         attentions_per_edge = self.neighborhood_aware_softmax(scores_per_edge, edge_index[self.trg_nodes_dim], num_of_nodes)

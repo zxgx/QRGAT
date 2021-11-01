@@ -38,9 +38,9 @@ class QAModel(nn.Module):
         layers = []
         for i in range(num_step):
             layers.append(GATLayer(
-                num_in_features[i], num_out_features[i], num_heads[i], concat=False if i == num_step-1 else True,
-                activation=nn.ELU() if i != num_step-1 else None, dropout_prob=gat_dropout,
-                add_skip_connection=gat_skip, bias=gat_bias,
+                num_in_features[i], num_out_features[i], num_heads[i], relation_dim, hidden_dim,
+                concat=False if i == num_step-1 else True, activation=nn.ELU() if i != num_step-1 else None,
+                dropout_prob=gat_dropout, add_skip_connection=gat_skip, bias=gat_bias,
             ))
         self.gat = nn.ModuleList(layers)
 
@@ -65,7 +65,7 @@ class QAModel(nn.Module):
         entity_emb = self.entity_encoder(fact_relations, edge_index, batch_size*max_local_entity)
 
         for i in range(self.num_step):
-            entity_emb = self.gat[i](entity_emb, edge_index)
+            entity_emb = self.gat[i](entity_emb, edge_index, fact_relations, instructions[i], batch_ids, max_local_entity)
 
         # batch size, max local entity, hidden dim
         entity_emb = entity_emb.view(batch_size, max_local_entity, -1)

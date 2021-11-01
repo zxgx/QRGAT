@@ -11,6 +11,7 @@ class EntityInit(nn.Module):
             nn.Linear(relation_dim, hidden_dim),
             nn.ReLU()
         )
+        self.layer_norm = nn.LayerNorm(hidden_dim * (2 if direction == 'all' else 1))
         self.direction = direction
 
     def forward(self, fact_relations, edge_index, num_ents):
@@ -50,4 +51,4 @@ class EntityInit(nn.Module):
             # batch size * max local entity, hidden dim * 2
             local_entity = F.relu(torch.cat([head_ent, tail_ent], dim=1))
 
-        return local_entity
+        return self.layer_norm(local_entity)
