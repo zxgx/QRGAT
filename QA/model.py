@@ -34,8 +34,8 @@ class QAModel(nn.Module):
         #
         # Graph Encoder
         #
-        num_in_features = [hidden_dim * (2 if direction == 'all' else 1)] + \
-                          [gat_head_dim * gat_head_size for _ in range(num_step-1)]
+        num_dir = 2 if direction == 'all' else 1
+        num_in_features = [hidden_dim * num_dir] + [gat_head_dim * num_dir * gat_head_size for _ in range(num_step-1)]
         num_out_features = [gat_head_dim for _ in range(num_step-1)] + [hidden_dim]
         num_heads = [gat_head_size for _ in range(num_step)]
 
@@ -44,9 +44,11 @@ class QAModel(nn.Module):
             layers.append(GATLayer(
                 num_in_features[i], num_out_features[i], num_heads[i], relation_dim, hidden_dim,
                 concat=False if i == num_step-1 else True, activation=nn.ELU() if i != num_step-1 else None,
-                dropout_prob=gat_dropout, add_skip_connection=gat_skip, bias=gat_bias,
+                dropout_prob=gat_dropout, add_skip_connection=gat_skip, bias=gat_bias, direction=direction
             ))
         self.gat = nn.ModuleList(layers)
+
+        self.entity_proj = nn.Linear(hidden_dim * num_dir, hidden_dim)
 
     def forward(self, batch):
         question, question_mask, topic_label, entity_mask, subgraph = batch
@@ -72,7 +74,7 @@ class QAModel(nn.Module):
             entity_emb = self.gat[i](entity_emb, edge_index, fact_relations, instructions[i], batch_ids, max_local_entity)
 
         # batch size, max local entity, hidden dim
-        entity_emb = entity_emb.view(batch_size, max_local_entity, -1)
+        entity_emb = self.entity_proj(entity_emb.view(batch_size, max_local_entity, -1))
 
         # batch size, max local entity
         predict_scores = entity_mask * question.matmul(entity_emb.transpose(1, 2)).squeeze(1) + (1 - entity_mask) * -1e20

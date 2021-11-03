@@ -17,7 +17,7 @@ class GATLayer(torch.nn.Module):
     head_dim = 1       # attention head dimension/axis
 
     def __init__(self, num_in_features, num_out_features, num_of_heads, edge_dim, hidden_dim, concat, activation,
-                 dropout_prob=0.6, add_skip_connection=True, bias=True, log_attention_weights=False):
+                 direction, dropout_prob=0.6, add_skip_connection=True, bias=True, log_attention_weights=False):
 
         super().__init__()
 
@@ -76,6 +76,7 @@ class GATLayer(torch.nn.Module):
         self.attention_weights = None  # for later visualization purposes, I cache the weights here
 
         self.init_params()
+        self.direction = direction
 
     def init_params(self):
         """
@@ -135,6 +136,8 @@ class GATLayer(torch.nn.Module):
         in_nodes_features: [ batch size, feature dim ]
         edge_index: [ 2, edge size ]
         """
+        src_index, trg_index = edge_index[0], edge_index[1]
+
         #
         # Step 1: Linear Projection + regularization
         #
@@ -178,31 +181,49 @@ class GATLayer(torch.nn.Module):
         # the possible combinations of scores we just prepare those that will actually be used and those are defined
         # by the edge index.
         # scores shape = (E, NH), nodes_features_proj_lifted shape = (E, NH, FOUT), E - number of edges in the graph
-        scores_source_lifted, scores_target_lifted, nodes_features_proj_lifted = self.lift(scores_source, scores_target, nodes_features_proj, edge_index)
+        scores_source_lifted = scores_source.index_select(self.nodes_dim, src_index)
+        scores_target_lifted = scores_target.index_select(self.nodes_dim, trg_index)
         scores_per_edge = self.leakyReLU(scores_source_lifted + scores_target_lifted + scores_edge)
 
-        # shape = (E, NH, 1)
-        attentions_per_edge = self.neighborhood_aware_softmax(scores_per_edge, edge_index[self.trg_nodes_dim], num_of_nodes)
-        # Add stochasticity to neighborhood aggregation
-        attentions_per_edge = self.dropout(attentions_per_edge)
+        if self.direction == 'outward':
+            # E, NH, FOUT
+            source_features_proj = nodes_features_proj.index_select(self.nodes_dim, src_index)
+            # E, NH, 1
+            attentions_per_edge = self.neighborhood_aware_softmax(scores_per_edge, trg_index, num_of_nodes)
+            # E, NH, FOUT
+            source_features_proj_weighted = source_features_proj * self.dropout(attentions_per_edge)
+            # N, NH, FOUT
+            out_nodes_features = self.aggregate_neighbors(source_features_proj_weighted, trg_index, in_nodes_features, num_of_nodes)
+            out_nodes_features = self.skip_concat_bias(attentions_per_edge, in_nodes_features, out_nodes_features)
+        elif self.direction == 'inward':
+            # E, NH, FOUT
+            target_features_proj = nodes_features_proj.index_select(self.nodes_dim, trg_index)
+            # E, NH, 1
+            attentions_per_edge = self.neighborhood_aware_softmax(scores_per_edge, src_index, num_of_nodes)
+            # E, NH, FOUT
+            target_features_proj_weighted = target_features_proj * self.dropout(attentions_per_edge)
+            # N, NH, FOUT
+            out_nodes_features = self.aggregate_neighbors(target_features_proj_weighted, src_index, in_nodes_features, num_of_nodes)
+            out_nodes_features = self.skip_concat_bias(attentions_per_edge, in_nodes_features, out_nodes_features)
+        else:
+            # E, NH, FOUT
+            source_features_proj = nodes_features_proj.index_select(self.nodes_dim, src_index)
+            # E, NH, 1
+            source_attention = self.dropout(self.neighborhood_aware_softmax(scores_per_edge, trg_index, num_of_nodes))
+            # E, NH, FOUT
+            source_features_proj_weighted = source_features_proj * source_attention
+            # N, NH, FOUT
+            trg_features = self.aggregate_neighbors(source_features_proj_weighted, trg_index, in_nodes_features, num_of_nodes)
+            trg_features = self.skip_concat_bias(source_attention, in_nodes_features, trg_features)
 
-        #
-        # Step 3: Neighborhood aggregation
-        #
+            target_features_proj = nodes_features_proj.index_select(self.nodes_dim, trg_index)
+            target_attention = self.dropout(self.neighborhood_aware_softmax(scores_per_edge, src_index, num_of_nodes))
+            target_features_proj_weighted = target_features_proj * target_attention
+            src_features = self.aggregate_neighbors(target_features_proj_weighted, src_index, in_nodes_features, num_of_nodes)
+            src_features = self.skip_concat_bias(target_attention, in_nodes_features, src_features)
 
-        # Element-wise (aka Hadamard) product. Operator * does the same thing as torch.mul
-        # shape = (E, NH, FOUT) * (E, NH, 1) -> (E, NH, FOUT), 1 gets broadcast into FOUT
-        nodes_features_proj_lifted_weighted = nodes_features_proj_lifted * attentions_per_edge
-
-        # This part sums up weighted and projected neighborhood feature vectors for every target node
-        # shape = (N, NH, FOUT)
-        out_nodes_features = self.aggregate_neighbors(nodes_features_proj_lifted_weighted, edge_index, in_nodes_features, num_of_nodes)
-
-        #
-        # Step 4: Residual/skip connections, concat and bias
-        #
-
-        out_nodes_features = self.skip_concat_bias(attentions_per_edge, in_nodes_features, out_nodes_features)
+            # N, NH * FOUT * 2
+            out_nodes_features = torch.cat([src_features, trg_features], dim=1)
         return out_nodes_features
 
     #
@@ -258,13 +279,13 @@ class GATLayer(torch.nn.Module):
         # shape = (N, NH) -> (E, NH)
         return neighborhood_sums.index_select(self.nodes_dim, trg_index)
 
-    def aggregate_neighbors(self, nodes_features_proj_lifted_weighted, edge_index, in_nodes_features, num_of_nodes):
+    def aggregate_neighbors(self, nodes_features_proj_lifted_weighted, trg_index, in_nodes_features, num_of_nodes):
         size = list(nodes_features_proj_lifted_weighted.shape)  # convert to list otherwise assignment is not possible
         size[self.nodes_dim] = num_of_nodes  # shape = (N, NH, FOUT)
         out_nodes_features = torch.zeros(size, dtype=in_nodes_features.dtype, device=in_nodes_features.device)
 
         # shape = (E) -> (E, NH, FOUT)
-        trg_index_broadcasted = self.explicit_broadcast(edge_index[self.trg_nodes_dim], nodes_features_proj_lifted_weighted)
+        trg_index_broadcasted = self.explicit_broadcast(trg_index, nodes_features_proj_lifted_weighted)
         # aggregation step - we accumulate projected, weighted node features for all the attention heads
         # shape = (E, NH, FOUT) -> (N, NH, FOUT)
         out_nodes_features.scatter_add_(self.nodes_dim, trg_index_broadcasted, nodes_features_proj_lifted_weighted)
