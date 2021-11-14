@@ -34,7 +34,7 @@ class Instruction(nn.Module):
         question_len = question_mask.long().sum(dim=1)  # batch size
         question_len, idx = torch.sort(question_len, descending=True)
 
-        packed_input = nn.utils.rnn.pack_padded_sequence(question[idx], question_len, batch_first=True)
+        packed_input = nn.utils.rnn.pack_padded_sequence(question[idx], question_len.tolist(), batch_first=True)
         packed_output, (hidden, _) = self.lstm(packed_input)
         question_token, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True, total_length=max_seq_len)
 

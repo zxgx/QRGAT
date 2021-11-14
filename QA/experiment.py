@@ -15,6 +15,7 @@ param_config = {
     '--direction': ['all'],
     '--word_emb_path': ['word_emb.npy'],
 
+    '--graph_encoder_type': ['MIX'],
     '--gat_head_dim': [25],
     '--gat_head_size': [8],
     '--gat_dropout': [0.0],

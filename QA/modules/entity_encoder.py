@@ -28,7 +28,7 @@ class EntityInit(nn.Module):
             # batch size * max local entity, hidden dim
             local_entity = torch.zeros(size, dtype=fact_relations.dtype, device=fact_relations.device)
             local_entity.scatter_add_(0, tgt_index, fact_relations)
-            local_entity = F.relu(local_entity)
+
         elif self.direction == 'inward':
             # fact size, hidden dim
             src_index = edge_index[0].unsqueeze(1).expand_as(fact_relations)
@@ -36,7 +36,7 @@ class EntityInit(nn.Module):
             # batch size * max local entity, hidden dim
             local_entity = torch.zeros(size, dtype=fact_relations.dtype, device=fact_relations.device)
             local_entity.scatter_add_(0, src_index, fact_relations)
-            local_entity = F.relu(local_entity)
+
         else:
             # fact size, hidden dim
             src_index = edge_index[0].unsqueeze(1).expand_as(fact_relations)
@@ -47,8 +47,9 @@ class EntityInit(nn.Module):
             tail_ent = torch.zeros(size, dtype=fact_relations.dtype, device=fact_relations.device)
             head_ent.scatter_add_(0, src_index, fact_relations)
             tail_ent.scatter_add_(0, tgt_index, fact_relations)
-
+            # print("Head ents: %s" % head_ent[0, :5].tolist())
+            # print("Tail ents: %s" % tail_ent[0, :5].tolist())
             # batch size * max local entity, hidden dim * 2
-            local_entity = F.relu(torch.cat([head_ent, tail_ent], dim=1))
+            local_entity = torch.cat([head_ent, tail_ent], dim=1)
 
         return self.layer_norm(local_entity)

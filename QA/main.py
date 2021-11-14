@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument('--word_emb_path', type=str, default=None)
     parser.add_argument('--relation_emb_path', type=str, default=None)
 
+    parser.add_argument('--graph_encoder_type', choices=['GAT', 'NSM', 'MIX'], default='GAT', type=str)
     parser.add_argument('--gat_head_dim', type=int, default=25)
     parser.add_argument('--gat_head_size', type=int, default=8)
     parser.add_argument('--gat_dropout', type=float, default=0.6)
@@ -70,7 +71,7 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
     best_hit1, best_f1, best_model, stop_increase = 0., 0., model.state_dict(), 0
     for epoch in range(epochs):
         model.train()
-        st, tot_loss, tot_kge_loss = time.time(), 0., 0.
+        st, tot_loss = time.time(), 0.
         for batch in train_data.batching():
             data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
 
@@ -93,10 +94,10 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
 
             tot_loss += loss.item()
 
-        print('Epoch: %d / %d | Training loss: %.4f, kge loss: %.4f ' %
-              (epoch+1, epochs, tot_loss, tot_kge_loss), end='')
+        print('Epoch: %d / %d | Training loss: %.4f ' %
+              (epoch+1, epochs, tot_loss), end='')
         if (epoch+1) % evaluate_every == 0:
-            hit1, _, _, f1, eval_kge_loss = evaluate(model, dev_data)
+            hit1, _, _, f1 = evaluate(model, dev_data)
             if hit1 > best_hit1:
                 best_hit1, best_model = hit1, model.state_dict()
                 stop_increase = 0
@@ -104,8 +105,8 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
                 stop_increase += 1
             if f1 > best_f1:
                 best_f1 = f1
-            print('| Develop hit@1: %.4f / %.4f, f1: %.4f / %.4f, kge loss: %.4f' %
-                  (hit1, best_hit1, f1, best_f1, eval_kge_loss), end='')
+            print('| Develop hit@1: %.4f / %.4f, f1: %.4f / %.4f' %
+                  (hit1, best_hit1, f1, best_f1), end='')
             if scheduler is not None:
                 scheduler.step(hit1)
         print('| Time Cost: %.2fs' % (time.time() - st), end='\n' + '=' * 40 + '\n')
@@ -122,7 +123,6 @@ def evaluate(model, data_loader, eps=0.95):
     model.eval()
     ignore_prob = (1 - eps) / data_loader.max_local_entity
     hits, hits5, hits10, f1s = 0., 0., 0., 0.
-    tot_kge_loss = 0.
 
     with torch.no_grad():
         for batch in data_loader.batching():
@@ -135,7 +135,7 @@ def evaluate(model, data_loader, eps=0.95):
             for d_id, pred_dist, _q, t_dist, a_list in zip(data_id, predict_dist, question, topic_label, answer_list):
                 g2l = data_loader.global2local_maps[d_id]
                 l2g = {v: k for k, v in g2l.items()}
-                t_idx = t_dist.nonzero().squeeze(1)
+                t_idx = torch.nonzero(t_dist, as_tuple=False).squeeze(1)
 
                 pred_dist[t_idx] = 0
                 retrieved, correct, acc_prob = [], 0., 0.
@@ -174,7 +174,7 @@ def evaluate(model, data_loader, eps=0.95):
     hits5 /= data_loader.num_data
     hits10 /= data_loader.num_data
     f1s /= data_loader.num_data
-    return hits, hits5, hits10, f1s, tot_kge_loss
+    return hits, hits5, hits10, f1s
 
 
 def main():
@@ -248,8 +248,9 @@ def main():
         word_size=tokenizer.num_token, word_dim=args.word_dim, hidden_dim=args.hidden_dim,
         question_dropout=args.question_dropout, linear_dropout=args.linear_dropout, num_step=args.num_step,
         pretrained_emb=word_emb, relation_size=len(rel2idx), relation_dim=args.relation_dim,
-        pretrained_relation=rel_emb, direction=args.direction, gat_head_dim=args.gat_head_dim,
-        gat_head_size=args.gat_head_size,  gat_dropout=args.gat_dropout, gat_skip=args.gat_skip, gat_bias=args.gat_bias,
+        pretrained_relation=rel_emb, direction=args.direction, graph_encoder_type=args.graph_encoder_type,
+        gat_head_dim=args.gat_head_dim, gat_head_size=args.gat_head_size,  gat_dropout=args.gat_dropout,
+        gat_skip=args.gat_skip, gat_bias=args.gat_bias,
     )
     print(model)
 
@@ -269,6 +270,58 @@ def main():
     print('Initialization finished, time cost: %.2f' % (time.time() - start_time))
 
     ######################### Sanity Check #####################################
+    # for batch in train_data.batching():
+    #     data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
+    #     print(question.shape)
+    #     for _data_id, _question, _question_mask, _topic_label, _entity_mask, _ans_label, _ans_list in zip(data_id, question, question_mask, topic_label, entity_mask, answer_label, answer_list):
+    #         print("ID: %s" % _data_id)
+    #
+    #         print("Question: %s" % tokenizer.decode(_question.tolist()))
+    #         print("Question Mask: %s" % _question_mask.long().tolist())
+    #
+    #         g2l = train_data.global2local_maps[_data_id]
+    #         l2g = {v: k for k, v in g2l.items()}
+    #         t_idx = torch.nonzero(_topic_label, as_tuple=False).squeeze(1)
+    #         print("Topic entities: %s" % [l2g[x] for x in t_idx.tolist()])
+    #
+    #         print("Answer List: %s" % ([idx2ent[x] for x in _ans_list]))
+    #         ans = torch.nonzero(_ans_label, as_tuple=False).squeeze(1)
+    #         print("Answer Label: %s" % ([idx2ent[l2g[x]] for x in ans.tolist()]))
+    #         print('=' * 50 + '\n')
+    #
+    #     print("Subgraphs:")
+    #     batch_ids, batch_relations, edge_index = subgraph
+    #     edge_counts = torch.bincount(batch_ids).tolist()
+    #     batch_start = 0
+    #     for i, edge_count in enumerate(edge_counts):
+    #         off_set = i * train_data.max_local_entity
+    #
+    #         heads = (edge_index[0][batch_start: batch_start+5] - off_set).tolist()
+    #         rels = batch_relations[batch_start: batch_start+5].tolist()
+    #         tails = (edge_index[1][batch_start: batch_start+5] - off_set).tolist()
+    #         batch_start += edge_count
+    #
+    #         _data_id = data_id[i]
+    #         g2l = train_data.global2local_maps[_data_id]
+    #         l2g = {v: k for k, v in g2l.items()}
+    #         print("ID: %s" % _data_id)
+    #         for head, rel, tail in zip(heads, rels, tails):
+    #             print("[%s, %s, %s]" % (l2g[head], rel, l2g[tail]))
+    #         print('=' * 50 + '\n')
+    # exit(0)
+
+    # model.eval()
+    # with torch.no_grad():
+    #     for e in range(3):
+    #         for batch in train_data.batching():
+    #             data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
+    #
+    #             # batch size, max local entity
+    #             scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+    #             print("Scores: %s" % scores[0, :5].tolist())
+    #             print("=" * 50 + '\n')
+    # exit(0)
+
     # optimizer = torch.optim.Adam(
     #     filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
     # model.train()
@@ -307,7 +360,7 @@ def main():
         model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     if args.eval:
-        hits1, hits5, hits10, f1, _ = evaluate(model, test_data)
+        hits1, hits5, hits10, f1 = evaluate(model, test_data)
         print("Test hits@1: %.4f, hits@5: %.4f, hits@10: %.4f, f1: %.4f" % (hits1, hits5, hits10, f1))
 
 

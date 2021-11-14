@@ -161,8 +161,8 @@ class QADataset:
 
             topic_ent = set([g2l[x] for x in each['topic entities']])
             for ent in topic_ent:
-                # self.topic_label[i, ent] = 1
-                self.topic_label[i, ent] = 1 / len(topic_ent)
+                self.topic_label[i, ent] = 1
+                # self.topic_label[i, ent] = 1 / len(topic_ent)
 
             for g, l in g2l.items():
                 self.entity_mask[i, l] = 1
