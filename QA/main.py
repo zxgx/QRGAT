@@ -50,6 +50,8 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=0.)
     parser.add_argument('--label_smooth', type=float, default=0.)
 
+    parser.add_argument('--fine_tune', action='store_true')
+
     # Log
     parser.add_argument('--checkpoint', type=str, default=None)
     parser.add_argument('--save_path', type=str, default=None)
@@ -216,6 +218,8 @@ def main():
     train_data, dev_data, test_data = None, None, None
     device = torch.device(args.device)
     if args.train:
+        if args.fine_tune:
+            train_data_path = os.path.join(dataset_dir, 'finetune.json')
         train_data = QADataset(
             data_path=train_data_path, token_path=train_token_path, ent2idx=ent2idx, rel2idx=rel2idx,
             tokenizer=tokenizer, batch_size=args.batch_size, training=True, device=device,
