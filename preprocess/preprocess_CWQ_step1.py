@@ -38,22 +38,22 @@ for file in files:
             }
             f_out.write(json.dumps(sample)+'\n')
 
-            if len(ent_list) == 0:  # manual check
-                """
-                WebQTest-1956_5610ad35b96b7e38d0836d9c9bd8cd17
-                WebQTest-1956_3d784c638d4b044d17ab942ee87db9cf
-                WebQTest-1956_650372fbf8339023d462b452320d9f26
-                WebQTest-1956_2d8b1c60ea068727728bfdf699ec0ed7
-                WebQTest-1956_92dc128ba132d9910b46ff7002918caa
-                WebQTest-1956_7df8cb1d6655be1b311c324761de106b
-                WebQTest-1956_ed9842b42608ed4538f187dc18a3902b
-                WebQTest-1956_174a491f694bb264c4ccbe56d70144f1
-                """
-                print(ID)
+            # if len(ent_list) == 0:  # manual check
+            #     """
+            #     WebQTest-1956_5610ad35b96b7e38d0836d9c9bd8cd17
+            #     WebQTest-1956_3d784c638d4b044d17ab942ee87db9cf
+            #     WebQTest-1956_650372fbf8339023d462b452320d9f26
+            #     WebQTest-1956_2d8b1c60ea068727728bfdf699ec0ed7
+            #     WebQTest-1956_92dc128ba132d9910b46ff7002918caa
+            #     WebQTest-1956_7df8cb1d6655be1b311c324761de106b
+            #     WebQTest-1956_ed9842b42608ed4538f187dc18a3902b
+            #     WebQTest-1956_174a491f694bb264c4ccbe56d70144f1
+            #     """
+            #     print(ID)
 
 f_out.close()
 
-print(len(seed_ent))  # 11843
+# print(len(seed_ent))  # 11843
 seed_file = os.path.join(dataset_dir, 'seed.txt')
 f_seed = open(seed_file, 'w')
 for each in seed_ent:

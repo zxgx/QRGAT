@@ -40,13 +40,13 @@ for file in files:
             }
             f_out.write(json.dumps(sample)+'\n')
 
-            if len(ent_list) == 0:
-                # WebQTest-1133, WebQTrn-1466
-                print(ID)
+            # if len(ent_list) == 0:
+            #     # WebQTest-1133, WebQTrn-1466
+            #     print(ID)
 
 f_out.close()
 
-print(len(seed_ent))  # 2643
+# print(len(seed_ent))  # 2643
 seed_file = os.path.join(dataset_dir, 'seed.txt')
 f_seed = open(seed_file, 'w')
 for each in seed_ent:

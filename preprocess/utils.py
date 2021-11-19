@@ -1,3 +1,4 @@
+import re
 
 
 def is_ent(tp_str):
@@ -15,6 +16,11 @@ def find_entity(sparql_str):
     for line in str_lines[1:]:
         if "ns:" not in line:
             continue
+        literals = re.findall('".*"@en', line)
+        if literals:
+            literals = [x[1:-4] for x in literals]
+            print(literals)
+            ent_set.update(literals)
         spline = line.strip().split(" ")
         for item in spline:
             ent_str = item[3:].replace("(", "")
