@@ -21,7 +21,7 @@ def find_entity(sparql_str):
             literals = [x[1:-4] for x in literals]
             print(literals)
             ent_set.update(literals)
-        spline = line.strip().split(" ")
+        spline = line.strip().split()
         for item in spline:
             ent_str = item[3:].replace("(", "")
             ent_str = ent_str.replace(")", "")
@@ -29,3 +29,13 @@ def find_entity(sparql_str):
                 ent_set.add(ent_str)
 
     return ent_set
+
+
+def load_dict(path):
+    obj2idx, idx2obj = dict(), list()
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            obj2idx[line] = len(obj2idx)
+            idx2obj.append(line)
+    return obj2idx, idx2obj
