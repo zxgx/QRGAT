@@ -163,21 +163,30 @@ def retrieve_subgraph(kb_file, ent_file, rel_file, in_file, out_file=None, max_e
         for entity in data['entities']:
             if entity in ent2idx:
                 entity_set.add(ent2idx[entity])
+        tick = time.time()
         triple_set = get_2hop_triples(triples, idx2ent, entity_set)
+        print("get 2 hop subgraph:", time.time() - tick)
 
         if len(entity_set) == 0 or len(triple_set) == 0:
             extracted_tuples, extracted_entities = [], []
             print("Bad question", data['id'])
         else:
+            tick = time.time()
             ent2id, rel2id, sp_mat = build_sp_mat(triple_set)
+            print("build sparse matrix:", time.time() - tick)
+
             seed_list = []
             for ent in entity_set:
                 if ent in ent2id:
                     seed_list.append(ent2id[ent])
+            tick = time.time()
             extracted_ents = rank_ppr_ents(seed_list, sp_mat, max_ent=max_ent)
+            print("PPR:", time.time() - tick)
             id2ent = {v: k for k, v in ent2id.items()}
-            ent_set_new = set(id2ent[ent] for ent in extracted_ents.tolist())
+            ent_set_new = set(id2ent[ent] for ent in extracted_ents.tolist()) | entity_set
+            tick = time.time()
             extracted_entities, extracted_tuples = get_subgraph(ent_set_new, triples, idx2ent, idx2rel, cvt_add_flag=False)
+            print("result subgrpah:", time.time() - tick)
 
         data['subgraph'] = {}
         data['subgraph']['tuples'] = extracted_tuples

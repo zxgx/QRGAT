@@ -3,7 +3,7 @@ import sys
 filter_domain = ['music.release', 'authority.musicbrainz', '22-rdf-syntax-ns#type', 'book.isbn',
                  'common.licensed_object', 'tv.tv_series_episode', 'type.namespace', 'type.content',
                  'type.permission', 'type.object.key', 'type.object.permission', 'type.type.instance',
-                 'topic_equivalent_webpage', 'dataworld.freeq']
+                 'topic_equivalent_webpage', 'dataworld.freeq', 'type.object.type', 'kg.object_profile.prominent_type']
 filter_set = set(filter_domain)
 input = "data/fb_en.txt"
 output = "manual_fb_filter.txt"
