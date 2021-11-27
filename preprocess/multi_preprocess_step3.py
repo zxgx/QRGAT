@@ -1,8 +1,10 @@
 from multiprocessing import Pool
+from multiprocessing import Manager
 from multiprocessing.shared_memory import SharedMemory
 from multiprocessing.managers import SharedMemoryManager
 import pickle
 import copy
+
 import sys
 import os
 import time
@@ -132,29 +134,9 @@ def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes):
     return triple_set
 
 
-def retrieve_subgraph(cvt_name, graph_name, ent2idx_name, idx2ent_name, idx2rel_name, qa_data_name, start_idx, end_idx,
-                      pid, output_file, max_ent=2000):
+def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, start_idx, end_idx, pid, output_file,
+                      max_ent=2000):
     st = time.time()
-    s_cvt_nodes = SharedMemory(cvt_name)
-    cvt_nodes = pickle.loads(s_cvt_nodes.buf.tobytes())
-    print("PID: %d | load CVT nodes: %.2fs" % (pid, time.time() - st))
-
-    tick = time.time()
-    s_triples = SharedMemory(graph_name)
-    triples = pickle.loads(s_triples.buf.tobytes())
-    s_ent2idx = SharedMemory(ent2idx_name)
-    ent2idx = pickle.loads(s_ent2idx.buf.tobytes())
-    s_idx2ent = SharedMemory(idx2ent_name)
-    idx2ent = pickle.loads(s_idx2ent.buf.tobytes())
-    s_idx2rel = SharedMemory(idx2rel_name)
-    idx2rel = pickle.loads(s_idx2rel.buf.tobytes())
-    print("PID: %d | load indexed KB: %.2fs" % (pid, time.time() - tick))
-
-    tick = time.time()
-    s_qa_data = SharedMemory(qa_data_name)
-    qa_data = pickle.loads(s_qa_data.buf.tobytes())
-    print("PID: %d | load QA data: %.2fs" % (pid, time.time() - tick))
-
     f_out = open(output_file, 'w')
     answer_coverage = []
     for idx in range(start_idx, end_idx):
@@ -199,12 +181,6 @@ def retrieve_subgraph(cvt_name, graph_name, ent2idx_name, idx2ent_name, idx2rel_
         answer_coverage.append(_get_answer_coverage(data["answers"], extracted_entities))
 
     f_out.close()
-    s_cvt_nodes.close()
-    s_triples.close()
-    s_ent2idx.close()
-    s_idx2ent.close()
-    s_idx2rel.close()
-    s_qa_data.close()
     print("PID: %d | Finish: %.2fs" % (pid, time.time() - st))
     return answer_coverage
 
@@ -222,17 +198,16 @@ if __name__ == '__main__':
     idx2rel_pkl = os.path.join(dataset_dir, 'idx2rel.pkl')
     qa_pkl = os.path.join(dataset_dir, 'step1.pkl')
 
+    manager = Manager()
     tick = time.time()
     if not os.path.exists(cvt_pkl):
         cvt_nodes = load_cvt(cvt_file)
         with open(cvt_pkl, 'wb') as f:
             pickle.dump(cvt_nodes, f)
-        b_cvt_nodes = pickle.dumps(cvt_nodes)
-        del cvt_nodes
     else:
         with open(cvt_pkl, 'rb') as f:
-            b_cvt_nodes = pickle.dumps(pickle.load(f))
-    b_cvt_nodes = memoryview(b_cvt_nodes)
+            cvt_nodes = pickle.load(f)
+    cvt_nodes = manager.dict(cvt_nodes)
     print("%.2fs for loading cvt nodes in bytes" % (time.time() - tick))
 
     tick = time.time()
@@ -251,12 +226,10 @@ if __name__ == '__main__':
 
         with open(graph_pkl, 'wb') as f:
             pickle.dump(triples, f)
-        b_triples = pickle.dumps(triples)
-        del triples
     else:
         with open(graph_pkl, 'rb') as f:
-            b_triples = pickle.dumps(pickle.load(f))
-    b_triples = memoryview(b_triples)
+            triples = pickle.load(f)
+    triples = manager.dict(triples)
     print("%.2fs for loading indexed graph in bytes" % (time.time() - tick))
 
     tick = time.time()
@@ -266,20 +239,16 @@ if __name__ == '__main__':
 
         with open(ent2idx_pkl, 'wb') as f:
             pickle.dump(ent2idx, f)
-        b_ent2idx = pickle.dumps(ent2idx)
-        del ent2idx
 
         with open(idx2ent_pkl, 'wb') as f:
             pickle.dump(idx2ent, f)
-        b_idx2ent = pickle.dumps(idx2ent)
-        del idx2ent
     else:
         with open(ent2idx_pkl, 'rb') as f:
-            b_ent2idx = pickle.dumps(pickle.load(f))
+            ent2idx = pickle.load(f)
         with open(idx2ent_pkl, 'rb') as f:
-            b_idx2ent = pickle.dumps(pickle.load(f))
-    b_ent2idx = memoryview(b_ent2idx)
-    b_idx2ent = memoryview(b_idx2ent)
+            idx2ent = pickle.load(f)
+    ent2idx = manager.dict(ent2idx)
+    idx2ent = manager.list(idx2ent)
     print("%.2fs for loading entity dict in bytes" % (time.time() - tick))
 
     tick = time.time()
@@ -289,12 +258,10 @@ if __name__ == '__main__':
 
         with open(idx2rel_pkl, 'wb') as f:
             pickle.dump(idx2rel, f)
-        b_idx2rel = pickle.dumps(idx2rel)
-        del idx2rel
     else:
         with open(idx2rel_pkl, 'rb') as f:
-            b_idx2rel = pickle.dumps(pickle.load(f))
-    b_idx2rel = memoryview(b_idx2rel)
+            idx2rel = pickle.load(f)
+    idx2rel = manager.list(idx2rel)
     print("%.2fs for loading relation dict in bytes" % (time.time() - tick))
 
     tick = time.time()
@@ -304,55 +271,30 @@ if __name__ == '__main__':
         with open(qa_file) as f:
             for line in f:
                 qa_data.append(json.loads(line))
-        b_qa_data = pickle.dumps(qa_data)
         num_data = len(qa_data)
+
         with open(qa_pkl, 'wb') as f:
             pickle.dump(qa_data, f)
-        del qa_data
     else:
         with open(qa_pkl, 'rb') as f:
-            b_qa_data = pickle.load(f)
-            num_data = len(b_qa_data)
-            b_qa_data = pickle.dumps(b_qa_data)
-    b_qa_data = memoryview(b_qa_data)
+            qa_data = pickle.load(f)
+            num_data = len(qa_data)
+    qa_data = manager.list(qa_data)
     print("%.2fs for loading qa data in bytes" % (time.time() - tick))
 
-    with SharedMemoryManager() as smm:
-        shared_cvt_nodes = smm.SharedMemory(b_cvt_nodes.nbytes)
-        shared_cvt_nodes.buf[:] = b_cvt_nodes
-
-        shared_triples = smm.SharedMemory(b_triples.nbytes)
-        shared_triples.buf[:] = b_triples
-
-        shared_ent2idx = smm.SharedMemory(b_ent2idx.nbytes)
-        shared_ent2idx.buf[:] = b_ent2idx
-
-        shared_idx2ent = smm.SharedMemory(b_idx2ent.nbytes)
-        shared_idx2ent.buf[:] = b_idx2ent
-
-        shared_idx2rel = smm.SharedMemory(b_idx2rel.nbytes)
-        shared_idx2rel.buf[:] = b_idx2rel
-
-        shared_qa_data = smm.SharedMemory(b_qa_data.nbytes)
-        shared_qa_data.buf[:] = b_qa_data
-
-        pool = Pool(num_process)
-        stride = num_data // num_process
-        results = []
-        for i in range(num_process):
-            start = i * stride
-            end = num_data if i == (num_process-1) else (i+1) * stride
-            output_file = os.path.join(dataset_dir, 'qa.raw.%d.json' % i)
-            result = pool.apply_async(
-                retrieve_subgraph, args=(
-                    shared_cvt_nodes.name, shared_triples.name, shared_ent2idx.name, shared_idx2ent.name,
-                    shared_idx2rel.name, shared_qa_data.name, start, end, i, output_file
-                )
-            )
-            results.append(result)
-        pool.close()
-        pool.join()
-
+    stride = num_data // num_process
+    results = []
+    pool = Pool(num_process)
+    for i in range(num_process):
+        start = i * stride
+        end = num_data if i == (num_process-1) else (i+1) * stride
+        output_file = os.path.join(dataset_dir, 'qa.raw.%d.json' % i)
+        result = pool.apply_async(
+            retrieve_subgraph, args=(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, start, end, i, output_file)
+        )
+        results.append(result)
+    pool.close()
+    pool.join()
     coverage = []
     for res in results:
         coverage.extend(res.get())
