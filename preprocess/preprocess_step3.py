@@ -1,3 +1,4 @@
+import pickle
 import sys
 import os
 import time
@@ -22,7 +23,7 @@ def _get_answer_coverage(answers, entities):
     return found / total
 
 
-def get_subgraph(cand_ents, triples, idx2ent, idx2rel, cvt_add_flag=True):
+def get_subgraph(cand_ents, triples, idx2ent, idx2rel, cvt_nodes, cvt_add_flag=False):
     triple_set, reserve_set = set(), set()
 
     for ent in cand_ents:
@@ -95,7 +96,7 @@ def build_sp_mat(subgraph):
     return ent2id, rel2id, normalize(sp_mat, norm="l1", axis=1)
 
 
-def get_2hop_triples(triples, idx2ent, seed_set):
+def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes):
     # all cvt cases are taken into consideration
     triple_set, hop1_triples = set(), set()
     for seed_ent in seed_set:
@@ -148,23 +149,20 @@ def load_kb(kb_file, ent_file, rel_file):
     return triples, ent2idx, idx2ent, idx2rel
 
 
-def retrieve_subgraph(kb_file, ent_file, rel_file, in_file, out_file=None, max_ent=2000):
+def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, start, end, output_file, max_ent=2000):
     st = time.time()
-    triples, ent2idx, idx2ent, idx2rel = load_kb(kb_file, ent_file, rel_file)
-    print("Load KB", time.time() - st)  # ~37 min and ~160G memory for webqsp
 
-    f = open(in_file)
-    f_out = open(out_file, "w")
-    answer_coverage = []
-    for i, line in enumerate(f):
-        data = json.loads(line)
+    f_out = open(output_file, "w")
+    for idx in range(start, end):
+        data = qa_data[idx]
+        print("Processing: %d (%d - %d), id: %s" % (idx, start, end-1, data['id']))
 
         entity_set = set()
         for entity in data['entities']:
             if entity in ent2idx:
                 entity_set.add(ent2idx[entity])
         tick = time.time()
-        triple_set = get_2hop_triples(triples, idx2ent, entity_set)
+        triple_set = get_2hop_triples(triples, idx2ent, entity_set, cvt_nodes)
         print("get 2 hop subgraph:", time.time() - tick)
 
         if len(entity_set) == 0 or len(triple_set) == 0:
@@ -185,7 +183,7 @@ def retrieve_subgraph(kb_file, ent_file, rel_file, in_file, out_file=None, max_e
             id2ent = {v: k for k, v in ent2id.items()}
             ent_set_new = set(id2ent[ent] for ent in extracted_ents.tolist()) | entity_set
             tick = time.time()
-            extracted_entities, extracted_tuples = get_subgraph(ent_set_new, triples, idx2ent, idx2rel, cvt_add_flag=False)
+            extracted_entities, extracted_tuples = get_subgraph(ent_set_new, triples, idx2ent, idx2rel, cvt_nodes)
             print("result subgrpah:", time.time() - tick)
 
         data['subgraph'] = {}
@@ -193,23 +191,101 @@ def retrieve_subgraph(kb_file, ent_file, rel_file, in_file, out_file=None, max_e
         data['subgraph']['entities'] = extracted_entities
         f_out.write(json.dumps(data) + "\n")
 
-        answer_coverage.append(_get_answer_coverage(data["answers"], extracted_entities))
-        if i % 100 == 0:
-            print("{} samples cost time:{:.1f} with coverage{:.3f}".format(i,
-                                                                           time.time() - st, np.mean(answer_coverage)))
-    f.close()
     f_out.close()
     print("Finish", time.time() - st)
-    print("Answer coverage in retrieved subgraphs = %.3f" % (np.mean(answer_coverage)))
 
 
-cvt_nodes = load_cvt('data/cvtnodes.bin')
+if __name__ == '__main__':
+    dataset_dir = sys.argv[1]
+    pid = int(sys.argv[2])
+    num_process = 16
 
-dataset_dir = sys.argv[1]
-graph_file = os.path.join(dataset_dir, 'subgraph.txt')
-ent_file = os.path.join(dataset_dir, 'ent.txt')
-rel_file = os.path.join(dataset_dir, 'rel.txt')
-qa_file = os.path.join(dataset_dir, 'step1.json')
-output_file = os.path.join(dataset_dir, 'qa.raw.json')
+    cvt_pkl = 'data/cvt.pkl'
+    tick = time.time()
+    if not os.path.exists(cvt_pkl):
+        cvt_file = 'data/cvtnodes.bin'
+        cvt_nodes = load_cvt(cvt_file)
+        with open(cvt_pkl, 'wb') as f:
+            pickle.dump(cvt_nodes, f)
+    else:
+        with open(cvt_pkl, 'rb') as f:
+            cvt_nodes = pickle.load(f)
+    print("%.2fs for loading cvt nodes" % (time.time() - tick))
 
-retrieve_subgraph(graph_file, ent_file, rel_file, qa_file, output_file, max_ent=2000)
+    graph_pkl = os.path.join(dataset_dir, 'subgraph.pkl')
+    tick = time.time()
+    if not os.path.exists(graph_pkl):
+        graph_file = os.path.join(dataset_dir, 'subgraph.txt')
+        triples = {}
+        with open(graph_file) as f:
+            for line in f:
+                head, rel, tail = line.strip().split("\t")
+                head, rel, tail = int(head), int(rel), int(tail)
+
+                triples.setdefault(head, set())
+                triples[head].add((head, rel, tail))
+                triples.setdefault(tail, set())
+                triples[tail].add((head, rel, tail))
+
+        with open(graph_pkl, 'wb') as f:
+            pickle.dump(triples, f)
+    else:
+        with open(graph_pkl, 'rb') as f:
+            triples = pickle.load(f)
+    print("%.2fs for loading indexed graph" % (time.time() - tick))
+
+    ent2idx_pkl = os.path.join(dataset_dir, 'ent2idx.pkl')
+    idx2ent_pkl = os.path.join(dataset_dir, 'idx2ent.pkl')
+    tick = time.time()
+    if not (os.path.exists(ent2idx_pkl) and os.path.exists(idx2ent_pkl)):
+        ent_file = os.path.join(dataset_dir, 'ent.txt')
+        ent2idx, idx2ent = load_dict(ent_file)
+
+        with open(ent2idx_pkl, 'wb') as f:
+            pickle.dump(ent2idx, f)
+
+        with open(idx2ent_pkl, 'wb') as f:
+            pickle.dump(idx2ent, f)
+    else:
+        with open(ent2idx_pkl, 'rb') as f:
+            ent2idx = pickle.load(f)
+        with open(idx2ent_pkl, 'rb') as f:
+            idx2ent = pickle.load(f)
+    print("%.2fs for loading entity dict" % (time.time() - tick))
+
+    idx2rel_pkl = os.path.join(dataset_dir, 'idx2rel.pkl')
+    tick = time.time()
+    if not os.path.exists(idx2rel_pkl):
+        rel_file = os.path.join(dataset_dir, 'rel.txt')
+        _, idx2rel = load_dict(rel_file)
+
+        with open(idx2rel_pkl, 'wb') as f:
+            pickle.dump(idx2rel, f)
+    else:
+        with open(idx2rel_pkl, 'rb') as f:
+            idx2rel = pickle.load(f)
+    print("%.2fs for loading relation dict" % (time.time() - tick))
+
+    qa_pkl = os.path.join(dataset_dir, 'step1.pkl')
+    tick = time.time()
+    if not os.path.exists(qa_pkl):
+        qa_file = os.path.join(dataset_dir, 'step1.json')
+        qa_data = []
+        with open(qa_file) as f:
+            for line in f:
+                qa_data.append(json.loads(line))
+        num_data = len(qa_data)
+
+        with open(qa_pkl, 'wb') as f:
+            pickle.dump(qa_data, f)
+    else:
+        with open(qa_pkl, 'rb') as f:
+            qa_data = pickle.load(f)
+            num_data = len(qa_data)
+    print("%.2fs for loading qa data" % (time.time() - tick))
+
+    batch_size = num_data // num_process
+    start = pid * batch_size
+    end = num_data if pid == num_process - 1 else (pid+1) * batch_size
+    output_file = os.path.join(dataset_dir, 'qa.raw.%d.json' % pid)
+    retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, start, end, output_file)

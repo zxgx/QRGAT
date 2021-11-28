@@ -26,7 +26,10 @@ def personalized_pagerank(seed, W, restart_prob=0.8, max_iter=20):
 
 def rank_ppr_ents(seed_list, sp_mat, mode="fixed", max_ent=500, min_ppr=0.005):
     seed = np.zeros((sp_mat.shape[0], 1))
-    seed[seed_list] = 1. / len(set(seed_list))
+    if seed_list:
+        seed[seed_list] = 1. / len(set(seed_list))
+    else:
+        seed += 1. / sp_mat.shape[0]
     ppr = personalized_pagerank(seed, sp_mat, restart_prob=0.8, max_iter=20)
     if mode == "fixed":
         sorted_idx = np.argsort(ppr)[::-1]
