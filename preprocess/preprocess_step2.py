@@ -1,5 +1,8 @@
 import sys
 import os
+from collections import Counter
+
+from utils import is_ent
 
 
 def load_seed(filename):
@@ -47,13 +50,17 @@ def filter_ent_from_triple(in_file, out_file):
     f.close()
 
 
-def build_index(subgraph_file, seed_file, idx_graph_path, ent_path, rel_path):
+def build_index(subgraph_file, seed_file, idx_graph_path, ent_path, rel_path, stop_ent_path):
     ent_dict, rel_dict = dict(), dict()
-
+    ent_counter = Counter()
     f = open(subgraph_file)
     f_out = open(idx_graph_path, 'w')
     for line in f:
         head, rel, tail = line.strip().split('\t')
+
+        ent_counter.update([head])
+        if is_ent(tail):
+            ent_counter.update([tail])
 
         if head not in ent_dict:
             ent_dict[head] = len(ent_dict)
@@ -81,6 +88,11 @@ def build_index(subgraph_file, seed_file, idx_graph_path, ent_path, rel_path):
     f_out = open(rel_path, 'w')
     for rel in rel_dict:
         f_out.write(rel+'\n')
+    f_out.close()
+
+    f_out = open(stop_ent_path, 'w')
+    for e, c in ent_counter.most_common(100):
+        f_out.write("%s\t%d\n" % (e, c))
     f_out.close()
 
     with open(seed_file) as f:
@@ -117,7 +129,9 @@ if __name__ == "__main__":
     subgraph_file = os.path.join(dataset_dir, 'subgraph.txt')
     ent_path = os.path.join(dataset_dir, 'ent.txt')
     rel_path = os.path.join(dataset_dir, 'rel.txt')
-    if os.path.exists(subgraph_file) and os.path.exists(ent_path) and os.path.exists(rel_path):
+    stop_ent_path = os.path.join(dataset_dir, 'stop_ent.txt')
+    if os.path.exists(subgraph_file) and os.path.exists(ent_path) and os.path.exists(rel_path) \
+            and os.path.exists(stop_ent_path):
         print("Skip index subgraph")
     else:
-        build_index(output_hop2, seed_file, subgraph_file, ent_path, rel_path)
+        build_index(output_hop2, seed_file, subgraph_file, ent_path, rel_path, stop_ent_path)
