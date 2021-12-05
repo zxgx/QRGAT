@@ -38,11 +38,11 @@ def filter_ent_from_triple(in_file, out_file):
     ent_set = set()
     for line in f:
         line = line.strip().split("\t")
-        # if is_ent(line[0]):
-        #     ent_set.add(line[0])
-        # if is_ent(line[2]):
-        #     ent_set.add(line[2])
-        ent_set.update([line[0], line[2]])
+        if is_ent(line[0]):
+            ent_set.add(line[0])
+        if is_ent(line[2]):
+            ent_set.add(line[2])
+        # ent_set.update([line[0], line[2]])
     f.close()
     f = open(out_file, "w")
     for ent in ent_set:
@@ -58,7 +58,6 @@ def build_index(subgraph_file, seed_file, idx_graph_path, ent_path, rel_path, st
     for line in f:
         head, rel, tail = line.strip().split('\t')
 
-        ent_counter.update([head])
         if is_ent(tail):
             ent_counter.update([tail])
 
@@ -91,7 +90,7 @@ def build_index(subgraph_file, seed_file, idx_graph_path, ent_path, rel_path, st
     f_out.close()
 
     f_out = open(stop_ent_path, 'w')
-    for e, c in ent_counter.most_common(100):
+    for e, c in ent_counter.most_common(150):
         f_out.write("%s\t%d\n" % (e, c))
     f_out.close()
 
