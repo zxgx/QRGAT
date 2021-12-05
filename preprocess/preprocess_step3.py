@@ -9,7 +9,7 @@ from sklearn.preprocessing import normalize
 
 from deal_cvt import load_cvt, is_cvt
 from ppr_util import rank_ppr_ents
-from utils import load_dict
+from utils import load_dict, is_ent
 
 
 def _get_answer_coverage(answers, entities):
@@ -23,12 +23,8 @@ def _get_answer_coverage(answers, entities):
     return found / total
 
 
-def get_subgraph(cand_ents, triples, idx2ent, idx2rel, cvt_nodes, cvt_add_flag=False):
-    triple_set, reserve_set = set(), set()
-
-    for ent in cand_ents:
-        if ent in triples:
-            triple_set |= triples[ent]
+def get_subgraph(cand_ents, triple_set, idx2ent, idx2rel, cvt_nodes, cvt_add_flag=False):
+    reserve_set = set()
 
     tp_edges = {}
     for triple in triple_set:
@@ -96,18 +92,28 @@ def build_sp_mat(subgraph):
     return ent2id, rel2id, normalize(sp_mat, norm="l1", axis=1)
 
 
-def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes):
+def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes, stop_ent):
     # all cvt cases are taken into consideration
     triple_set, hop1_triples = set(), set()
+    trp_cache, ent_cache = set(), set()
     for seed_ent in seed_set:
-        if seed_ent not in triples:
-            continue
-        hop1_triples |= triples[seed_ent]
-    triple_set |= hop1_triples
+        if seed_ent in triples:
+            if seed_ent not in stop_ent and is_ent(idx2ent[seed_ent]):
+                hop1_triples |= triples[seed_ent]
+            else:
+                trp_cache |= triples[seed_ent]
+                ent_cache.add(seed_ent)
+
+    if len(hop1_triples) == 0:
+        triple_set |= trp_cache
+        hop1_triples = trp_cache
+    else:
+        triple_set |= hop1_triples
+
     for head, rel, tail in hop1_triples:
-        if tail in triples:
+        if tail not in seed_set and tail in triples and tail not in stop_ent and is_ent(idx2ent[tail]):
             triple_set |= triples[tail]
-        if head in triples:
+        if head not in seed_set and head in triples and head not in stop_ent and is_ent(idx2ent[head]):
             triple_set |= triples[head]
 
     # remove edges that contains single cvt node
@@ -130,39 +136,21 @@ def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes):
     return triple_set
 
 
-def load_kb(kb_file, ent_file, rel_file):
-    ent2idx, idx2ent = load_dict(ent_file)
-    _, idx2rel = load_dict(rel_file)
-
-    triples = {}
-    f = open(kb_file)
-    for line in f:
-        head, rel, tail = line.strip().split("\t")
-        head, rel, tail = int(head), int(rel), int(tail)
-
-        triples.setdefault(head, set())
-        triples[head].add((head, rel, tail))
-        triples.setdefault(tail, set())
-        triples[tail].add((head, rel, tail))
-    f.close()
-
-    return triples, ent2idx, idx2ent, idx2rel
-
-
-def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, start, end, output_file, max_ent=2000):
+def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, stop_ent, qa_data, start, end, output_file,
+                      max_ent=2000):
     st = time.time()
 
     f_out = open(output_file, "w")
     for idx in range(start, end):
         data = qa_data[idx]
-        print("Processing: %d (%d - %d), id: %s" % (idx, start, end-1, data['id']))
+        print("\n\nProcessing: %d (%d - %d), id: %s" % (idx, start, end-1, data['id']))
 
         entity_set = set()
         for entity in data['entities']:
             if entity in ent2idx:
                 entity_set.add(ent2idx[entity])
         tick = time.time()
-        triple_set = get_2hop_triples(triples, idx2ent, entity_set, cvt_nodes)
+        triple_set = get_2hop_triples(triples, idx2ent, entity_set, cvt_nodes, stop_ent)
         print("get 2 hop subgraph:", time.time() - tick)
 
         if len(entity_set) == 0 or len(triple_set) == 0:
@@ -183,7 +171,7 @@ def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, st
             id2ent = {v: k for k, v in ent2id.items()}
             ent_set_new = set(id2ent[ent] for ent in extracted_ents.tolist()) | entity_set
             tick = time.time()
-            extracted_entities, extracted_tuples = get_subgraph(ent_set_new, triples, idx2ent, idx2rel, cvt_nodes)
+            extracted_entities, extracted_tuples = get_subgraph(ent_set_new, triple_set, idx2ent, idx2rel, cvt_nodes)
             print("result subgrpah:", time.time() - tick)
 
         data['subgraph'] = {}
@@ -198,7 +186,7 @@ def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, st
 if __name__ == '__main__':
     dataset_dir = sys.argv[1]
     pid = int(sys.argv[2])
-    num_process = 16
+    num_process = 1
 
     cvt_pkl = 'data/cvt.pkl'
     tick = time.time()
@@ -266,6 +254,23 @@ if __name__ == '__main__':
             idx2rel = pickle.load(f)
     print("%.2fs for loading relation dict" % (time.time() - tick))
 
+    stop_ent_pkl = os.path.join(dataset_dir, 'stop_ent.pkl')
+    tick = time.time()
+    if not os.path.exists(stop_ent_pkl):
+        stop_ent_path = os.path.join(dataset_dir, 'stop_ent.txt')
+        stop_ent = set()
+        with open(stop_ent_path) as f:
+            for i, line in enumerate(f):
+                ent, _ = line.strip().split('\t')
+                stop_ent.add(ent2idx[ent])
+
+        with open(stop_ent_pkl, 'wb') as f:
+            pickle.dump(stop_ent, f)
+    else:
+        with open(stop_ent_pkl, 'rb') as f:
+            stop_ent = pickle.load(f)
+    print("%.2fs for loading stop entities" % (time.time() - tick))
+
     qa_pkl = os.path.join(dataset_dir, 'step1.pkl')
     tick = time.time()
     if not os.path.exists(qa_pkl):
@@ -288,4 +293,4 @@ if __name__ == '__main__':
     start = pid * batch_size
     end = num_data if pid == num_process - 1 else (pid+1) * batch_size
     output_file = os.path.join(dataset_dir, 'qa.raw.%d.json' % pid)
-    retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, qa_data, start, end, output_file)
+    retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, stop_ent, qa_data, start, end, output_file)
