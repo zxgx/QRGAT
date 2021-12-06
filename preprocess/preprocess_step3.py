@@ -12,6 +12,44 @@ from ppr_util import rank_ppr_ents
 from utils import load_dict, is_ent
 
 
+def load_kb(dataset_dir, idx2ent, cvt_nodes):
+    path = os.path.join(dataset_dir, 'subgraph.pkl')
+    tick = time.time()
+    if not os.path.exists(path):
+        graph_file = os.path.join(dataset_dir, 'subgraph.txt')
+        triples = {}
+        cvt_header, cvt_tailer = {}, {}
+        with open(graph_file) as f:
+            for line in f:
+                head, rel, tail = line.strip().split("\t")
+                head, rel, tail = int(head), int(rel), int(tail)
+                if is_cvt(idx2ent[head], cvt_nodes):
+                    cvt_header.setdefault(head, set())
+                    cvt_header[head].add((head, rel, tail))
+                elif is_cvt(idx2ent[tail], cvt_nodes):
+                    cvt_tailer.setdefault(tail, set())
+                    cvt_tailer[tail].add((head, rel, tail))
+                else:
+                    triples.setdefault(head, set())
+                    triples[head].add((head, rel, tail))
+                    triples.setdefault(tail, set())
+                    triples[tail].add((head, rel, tail))
+        preserve_cvt = set(cvt_tailer.keys()) & set(cvt_header.keys())
+        for cvt in preserve_cvt:
+            for head, rel, tail in cvt_tailer[cvt]:
+                triples.setdefault(head, set())
+                triples[head].add((head, rel, tail))
+                triples[head] |= cvt_header[tail]
+
+        with open(path, 'wb') as f:
+            pickle.dump(triples, f)
+    else:
+        with open(path, 'rb') as f:
+            triples = pickle.load(f)
+    print("%.2fs for loading indexed graph" % (time.time() - tick))
+    return triples
+
+
 def _get_answer_coverage(answers, entities):
     if len(answers) == 0:
         return 1.0
@@ -26,29 +64,26 @@ def _get_answer_coverage(answers, entities):
 def get_subgraph(cand_ents, triple_set, idx2ent, idx2rel, cvt_nodes, cvt_add_flag=False):
     reserve_set = set()
 
-    tp_edges = {}
+    cvt_header, cvt_tailer = {}, {}
     for triple in triple_set:
         head, rel, tail = triple
         if head not in cand_ents or tail not in cand_ents:
             continue
-        reserve_set.add((head, rel, tail))
 
         if is_cvt(idx2ent[head], cvt_nodes):
-            tp_edges.setdefault(head, set())
-            tp_edges[head].add((head, rel, tail))
+            cvt_header.setdefault(head, set())
+            cvt_header[head].add((head, rel, tail))
         elif is_cvt(idx2ent[tail], cvt_nodes):
-            tp_edges.setdefault(tail, set())
-            tp_edges[tail].add((head, rel, tail))
+            cvt_tailer.setdefault(tail, set())
+            cvt_tailer[tail].add((head, rel, tail))
+        else:
+            reserve_set.add((head, rel, tail))
 
-    # remove or augment single cvt node
-    for ent in tp_edges:
-        if len(tp_edges[ent]) == 1:
-            triple = tp_edges[ent].pop()
+    preserve_cvt = set(cvt_tailer.keys()) & set(cvt_header.keys())
 
-            if cvt_add_flag and len(triples[ent]) > 1:
-                reserve_set |= triples[ent]
-            else:
-                reserve_set.remove(triple)
+    for cvt in preserve_cvt:
+        reserve_set |= cvt_tailer[cvt]
+        reserve_set |= cvt_header[cvt]
 
     ent_set, triple_list = set(), list()
     for triple in reserve_set:
@@ -92,21 +127,21 @@ def build_sp_mat(subgraph):
     return ent2id, rel2id, normalize(sp_mat, norm="l1", axis=1)
 
 
-def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes, stop_ent):
+def get_2hop_triples(triples, idx2ent, seed_set, stop_ent):
     # all cvt cases are taken into consideration
     triple_set, hop1_triples = set(), set()
-    trp_cache, ent_cache = set(), set()
+    ent_cache = set()
     for seed_ent in seed_set:
         if seed_ent in triples:
             if seed_ent not in stop_ent and is_ent(idx2ent[seed_ent]):
                 hop1_triples |= triples[seed_ent]
             else:
-                trp_cache |= triples[seed_ent]
                 ent_cache.add(seed_ent)
 
     if len(hop1_triples) == 0:
-        triple_set |= trp_cache
-        hop1_triples = trp_cache
+        for ent in ent_cache:
+            triple_set |= triples[ent]
+            hop1_triples |= triples[ent]
     else:
         triple_set |= hop1_triples
 
@@ -115,23 +150,6 @@ def get_2hop_triples(triples, idx2ent, seed_set, cvt_nodes, stop_ent):
             triple_set |= triples[tail]
         if head not in seed_set and head in triples and head not in stop_ent and is_ent(idx2ent[head]):
             triple_set |= triples[head]
-
-    # remove edges that contains single cvt node
-    cvt_edges = dict()
-    for triple in triple_set:
-        head, rel, tail = triple
-
-        if is_cvt(idx2ent[head], cvt_nodes):
-            cvt_edges.setdefault(head, set())
-            cvt_edges[head].add(triple)
-        elif is_cvt(idx2ent[tail], cvt_nodes):
-            cvt_edges.setdefault(tail, set())
-            cvt_edges[tail].add(triple)
-
-    for cvt_node in cvt_edges:
-        if len(cvt_edges[cvt_node]) == 1:
-            triple = cvt_edges[cvt_node].pop()
-            triple_set.remove(triple)
 
     return triple_set
 
@@ -150,7 +168,7 @@ def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, stop_ent, q
             if entity in ent2idx:
                 entity_set.add(ent2idx[entity])
         tick = time.time()
-        triple_set = get_2hop_triples(triples, idx2ent, entity_set, cvt_nodes, stop_ent)
+        triple_set = get_2hop_triples(triples, idx2ent, entity_set, stop_ent)
         print("get 2 hop subgraph:", time.time() - tick)
 
         if len(entity_set) == 0 or len(triple_set) == 0:
@@ -200,28 +218,6 @@ if __name__ == '__main__':
             cvt_nodes = pickle.load(f)
     print("%.2fs for loading cvt nodes" % (time.time() - tick))
 
-    graph_pkl = os.path.join(dataset_dir, 'subgraph.pkl')
-    tick = time.time()
-    if not os.path.exists(graph_pkl):
-        graph_file = os.path.join(dataset_dir, 'subgraph.txt')
-        triples = {}
-        with open(graph_file) as f:
-            for line in f:
-                head, rel, tail = line.strip().split("\t")
-                head, rel, tail = int(head), int(rel), int(tail)
-
-                triples.setdefault(head, set())
-                triples[head].add((head, rel, tail))
-                triples.setdefault(tail, set())
-                triples[tail].add((head, rel, tail))
-
-        with open(graph_pkl, 'wb') as f:
-            pickle.dump(triples, f)
-    else:
-        with open(graph_pkl, 'rb') as f:
-            triples = pickle.load(f)
-    print("%.2fs for loading indexed graph" % (time.time() - tick))
-
     ent2idx_pkl = os.path.join(dataset_dir, 'ent2idx.pkl')
     idx2ent_pkl = os.path.join(dataset_dir, 'idx2ent.pkl')
     tick = time.time()
@@ -240,6 +236,8 @@ if __name__ == '__main__':
         with open(idx2ent_pkl, 'rb') as f:
             idx2ent = pickle.load(f)
     print("%.2fs for loading entity dict" % (time.time() - tick))
+
+    triples = load_kb(dataset_dir, idx2ent, cvt_nodes)
 
     idx2rel_pkl = os.path.join(dataset_dir, 'idx2rel.pkl')
     tick = time.time()

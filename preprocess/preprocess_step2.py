@@ -1,8 +1,11 @@
+import pickle
+import time
 import sys
 import os
 from collections import Counter
 
 from utils import is_ent
+from deal_cvt import is_cvt, load_cvt
 
 
 def load_seed(filename):
@@ -14,21 +17,28 @@ def load_seed(filename):
     return seed_set
 
 
-def fetch_triple_1hop(kb_file, seed_file, output):
+def fetch_triple_1hop(kb_file, seed_file, output, cvt_nodes):
     seed_set = load_seed(seed_file)
     f_out = open(output, "w")
 
-    num_tot = 0
-    num_res = 0
+    cvt_set = set()
     f = open(kb_file)
     for line in f:
         spline = line.strip().split("\t")
-        num_tot += 1
 
         if spline[0] in seed_set or spline[2] in seed_set:  # bidirectional
             f_out.write(line)
-            num_res += 1
 
+            if spline[0] in seed_set and spline[2] not in seed_set and is_cvt(spline[2], cvt_nodes):
+                cvt_set.add(spline[2])
+
+    f.close()
+
+    f = open(kb_file)
+    for line in f:
+        head, rel, tail = line.strip().split('\t')
+        if head in cvt_set:
+            f_out.write(line)
     f.close()
     f_out.close()
 
@@ -107,11 +117,23 @@ if __name__ == "__main__":
 
     kb_file = 'manual_fb_filter.txt'
 
+    cvt_pkl = 'data/cvt.pkl'
+    tick = time.time()
+    if not os.path.exists(cvt_pkl):
+        cvt_file = 'data/cvtnodes.bin'
+        cvt_nodes = load_cvt(cvt_file)
+        with open(cvt_pkl, 'wb') as f:
+            pickle.dump(cvt_nodes, f)
+    else:
+        with open(cvt_pkl, 'rb') as f:
+            cvt_nodes = pickle.load(f)
+    print("%.2fs for loading cvt nodes" % (time.time() - tick))
+
     output_hop1 = os.path.join(dataset_dir, 'subgraph_hop1.txt')
     if os.path.exists(output_hop1):
         print("Skip 1st hop")
     else:
-        fetch_triple_1hop(kb_file=kb_file, seed_file=seed_file, output=output_hop1)
+        fetch_triple_1hop(kb_file=kb_file, seed_file=seed_file, output=output_hop1, cvt_nodes=cvt_nodes)
 
     hop1_ent_file = os.path.join(dataset_dir, 'ent_hop1.txt')
     if os.path.exists(hop1_ent_file):
@@ -123,7 +145,7 @@ if __name__ == "__main__":
     if os.path.exists(output_hop2):
         print("Skip 2nd hop")
     else:
-        fetch_triple_1hop(kb_file=kb_file, seed_file=hop1_ent_file, output=output_hop2)
+        fetch_triple_1hop(kb_file=kb_file, seed_file=hop1_ent_file, output=output_hop2, cvt_nodes=cvt_nodes)
 
     subgraph_file = os.path.join(dataset_dir, 'subgraph.txt')
     ent_path = os.path.join(dataset_dir, 'ent.txt')
