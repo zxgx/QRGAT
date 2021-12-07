@@ -29,16 +29,16 @@ def load_kb(dataset_dir, idx2ent, cvt_nodes):
                 elif is_cvt(idx2ent[tail], cvt_nodes):
                     cvt_tailer.setdefault(tail, set())
                     cvt_tailer[tail].add((head, rel, tail))
-                else:
-                    triples.setdefault(head, set())
-                    triples[head].add((head, rel, tail))
-                    triples.setdefault(tail, set())
-                    triples[tail].add((head, rel, tail))
+
+                triples.setdefault(head, set())
+                triples[head].add((head, rel, tail))
+                triples.setdefault(tail, set())
+                triples[tail].add((head, rel, tail))
+
         preserve_cvt = set(cvt_tailer.keys()) & set(cvt_header.keys())
         for cvt in preserve_cvt:
             for head, rel, tail in cvt_tailer[cvt]:
                 triples.setdefault(head, set())
-                triples[head].add((head, rel, tail))
                 triples[head] |= cvt_header[tail]
 
         with open(path, 'wb') as f:
@@ -48,17 +48,6 @@ def load_kb(dataset_dir, idx2ent, cvt_nodes):
             triples = pickle.load(f)
     print("%.2fs for loading indexed graph" % (time.time() - tick))
     return triples
-
-
-def _get_answer_coverage(answers, entities):
-    if len(answers) == 0:
-        return 1.0
-    found, total = 0., 0
-    for answer in answers:
-        if answer["kb_id"] in entities:
-            found += 1.
-        total += 1
-    return found / total
 
 
 def get_subgraph(cand_ents, triple_set, idx2ent, idx2rel, cvt_nodes, cvt_add_flag=False):
@@ -79,11 +68,19 @@ def get_subgraph(cand_ents, triple_set, idx2ent, idx2rel, cvt_nodes, cvt_add_fla
         else:
             reserve_set.add((head, rel, tail))
 
-    preserve_cvt = set(cvt_tailer.keys()) & set(cvt_header.keys())
+    tailers, headers = set(cvt_tailer.keys()), set(cvt_header.keys())
+    preserve_cvt = tailers & headers
 
     for cvt in preserve_cvt:
         reserve_set |= cvt_tailer[cvt]
         reserve_set |= cvt_header[cvt]
+
+    for cvt in (tailers - preserve_cvt):
+        if len(cvt_tailer[cvt]) > 1:
+            reserve_set |= cvt_tailer[cvt]
+    for cvt in (headers - preserve_cvt):
+        if len(cvt_header[cvt]) > 1:
+            reserve_set |= cvt_header[cvt]
 
     ent_set, triple_list = set(), list()
     for triple in reserve_set:
@@ -151,6 +148,11 @@ def get_2hop_triples(triples, idx2ent, seed_set, stop_ent):
         if head not in seed_set and head in triples and head not in stop_ent and is_ent(idx2ent[head]):
             triple_set |= triples[head]
 
+    if len(hop1_triples) != 0:
+        for ent in ent_cache:
+            triple_cache = triples[ent]
+            if len(triple_cache & triple_set) == 0:
+                triple_set |= triple_cache
     return triple_set
 
 
