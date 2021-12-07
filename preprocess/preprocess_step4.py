@@ -46,6 +46,11 @@ def simplify_data(qa_files, train_path, dev_path, test_path, new_ent_path, new_r
                 if tail not in ent2idx:
                     ent2idx[tail] = len(ent2idx)
                     f_ent.write(tail+'\n')
+
+            for ans in data['answers']:
+                if ans['kb_id'] not in ent2idx:
+                    ent2idx[ans['kb_id']] = len(ent2idx)
+
             data['subgraph']['tuples'] = [(ent2idx[head], rel2idx[rel], ent2idx[tail]) for head, rel, tail in data['subgraph']['tuples']]
             data['subgraph']['entities'] = [ent2idx[ent] for ent in data['subgraph']['entities']]
 
