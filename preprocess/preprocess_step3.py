@@ -135,12 +135,14 @@ def get_2hop_triples(triples, idx2ent, seed_set, stop_ent):
             else:
                 ent_cache.add(seed_ent)
 
+    flag = False
     if len(hop1_triples) == 0:
         for ent in ent_cache:
             triple_set |= triples[ent]
             hop1_triples |= triples[ent]
     else:
         triple_set |= hop1_triples
+        flag = True
 
     for head, rel, tail in hop1_triples:
         if tail not in seed_set and tail in triples and tail not in stop_ent and is_ent(idx2ent[tail]):
@@ -148,7 +150,7 @@ def get_2hop_triples(triples, idx2ent, seed_set, stop_ent):
         if head not in seed_set and head in triples and head not in stop_ent and is_ent(idx2ent[head]):
             triple_set |= triples[head]
 
-    if len(hop1_triples) != 0:
+    if flag:
         for ent in ent_cache:
             triple_cache = triples[ent]
             if len(triple_cache & triple_set) == 0:
@@ -206,7 +208,7 @@ def retrieve_subgraph(cvt_nodes, triples, ent2idx, idx2ent, idx2rel, stop_ent, q
 if __name__ == '__main__':
     dataset_dir = sys.argv[1]
     pid = int(sys.argv[2])
-    num_process = 1
+    num_process = 16
 
     cvt_pkl = 'data/cvt.pkl'
     tick = time.time()
