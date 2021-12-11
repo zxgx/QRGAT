@@ -5,7 +5,7 @@ import numpy as np
 
 class NSMLayer(nn.Module):
     def __init__(self, num_in_features, num_out_features, num_of_head, hidden_dim, relation_dim, concat, dropout,
-                 direction, nonlinear, skip):
+                 direction, skip):
         super(NSMLayer, self).__init__()
         self.num_in_features = num_in_features
         self.num_of_head = num_of_head
@@ -18,7 +18,8 @@ class NSMLayer(nn.Module):
         self.instruction_linear_proj = nn.Linear(hidden_dim, num_of_head * num_out_features)
         self.edge_linear_proj = nn.Linear(relation_dim, num_of_head * num_out_features)
 
-        self.scoring_fn_edge = nn.Parameter(torch.Tensor(1, num_of_head, num_out_features))
+        self.prior_score_fn = nn.Parameter(torch.Tensor(1, 1, num_of_head, num_out_features))
+        self.edge_score_fn = nn.Parameter(torch.Tensor(1, num_of_head, num_out_features))
 
         num_dir = 2 if direction == 'all' else 1
         self.weight_hh = nn.Linear(num_in_features, num_in_features * 3)
@@ -26,7 +27,10 @@ class NSMLayer(nn.Module):
                                    num_in_features * 3)
 
         self.dropout = nn.Dropout(dropout)
-        self.nonlinear = nonlinear
+        self.nonlinear = nn.Sequential(
+            nn.Linear(2*num_out_features, num_out_features),
+            nn.ReLU()
+        )
         self.leakyReLU = nn.LeakyReLU(0.2)
         self.agg_norm = nn.LayerNorm(num_out_features * (num_of_head if concat else 1) * num_dir)
         self.layer_norm = nn.LayerNorm(num_in_features)
@@ -36,7 +40,8 @@ class NSMLayer(nn.Module):
     def init_params(self):
         nn.init.xavier_uniform_(self.instruction_linear_proj.weight)
         nn.init.xavier_uniform_(self.edge_linear_proj.weight)
-        nn.init.xavier_uniform_(self.scoring_fn_edge)
+        nn.init.xavier_uniform_(self.edge_score_fn)
+        nn.init.xavier_uniform_(self.prior_score_fn)
         nn.init.xavier_uniform_(self.weight_ih.weight)
         nn.init.xavier_uniform_(self.weight_hh.weight)
         nn.init.xavier_uniform_(self.score_fn)
@@ -53,23 +58,23 @@ class NSMLayer(nn.Module):
             -1, self.num_of_head, self.num_out_features
         )
 
+        # batch size, max local entity, head size, out dim
+        node_features = nodes_proj * instruction_proj.unsqueeze(1)
         # batch size, max local entity, head size
-        node_scores = torch.sum(nodes_proj * instruction_proj.unsqueeze(1), dim=-1) * activation.unsqueeze(2)
+        node_scores = self.leakyReLU(node_features * self.prior_score_fn).sum(dim=-1)
+        node_scores = node_scores * activation.unsqueeze(2) + (1 - activation.unsqueeze(2)) * -1e20
         # node size, head size
         prior = torch.softmax(node_scores, dim=1).view(num_of_nodes, self.num_of_head)
 
-        # batch size, head size * out dim
-        instruction_proj = instruction_proj.view(batch_size, -1)
-        # print("projected instruction: %s" % instruction_proj[0, :5].tolist())
         # fact size, head size, out dim
-        instruction_proj = instruction_proj.index_select(0, batch_ids).view(-1, self.num_of_head, self.num_out_features)
+        instruction_proj = instruction_proj.index_select(0, batch_ids)
 
         edges_proj = self.edge_linear_proj(edges).view(-1, self.num_of_head, self.num_out_features)
         # print("projected edges: %s" % edges_proj[0, 0, :5].tolist())
-        features = self.nonlinear(edges_proj * instruction_proj)
+        edge_features = edges_proj * instruction_proj
         # print("org features: %s" % features[0, 0, :5].tolist())
         # fact size, head size
-        scores = self.leakyReLU(edges_proj * instruction_proj * self.scoring_fn_edge).sum(dim=-1)
+        scores = self.leakyReLU(edge_features * self.edge_score_fn).sum(dim=-1)
         # print("org scores: %s" % scores[0, :5].tolist())
         if self.direction == 'outward':
             activation = activation.view(-1, 1)  # batch size * max local entity, 1
@@ -84,7 +89,7 @@ class NSMLayer(nn.Module):
             attentions_per_edge = self.graph_attention(scores, src_index, num_of_nodes) * prior.unsqueeze(2)
             # print("attention: %s" % attentions_per_edge[0, :5, 0].tolist())
             # fact size, head size, out dim
-            weighted_features = attentions_per_edge * features
+            weighted_features = attentions_per_edge * edge_features
 
             # batch size * max local entity, head size, out dim
             # These features should be very sparse
@@ -103,7 +108,7 @@ class NSMLayer(nn.Module):
             attentions_per_edge = self.graph_attention(scores, trg_index, num_of_nodes) * prior.unsqueeze(2)
             # print("attention: %s" % attentions_per_edge[0, :5, 0].tolist())
             # fact size, head size, out dim
-            weighted_features = attentions_per_edge * features
+            weighted_features = attentions_per_edge * edge_features
             # batch size * max local entity, head size, out dim
             new_features = self.graph_aggregate(weighted_features, src_index, num_of_nodes)
             # print("new features: %s" % new_features[0, 0, :5].tolist())
@@ -130,9 +135,15 @@ class NSMLayer(nn.Module):
             inward_attention = self.graph_attention(scores, trg_index, num_of_nodes) * inward_prior
             # print("inward attention: %s" % inward_attention[0, :5, 0].tolist())
 
+            # node size, head size, out dim
+            node_features = node_features.view(-1, self.num_of_head, self.num_out_features)
             # fact size, head size, out dim
-            outward_weighted_features = outward_attention * features
-            inward_weighted_features = inward_attention * features
+            src_features = node_features.index_select(0, src_index)
+            outward_features = self.nonlinear(torch.cat([src_features, edge_features], dim=-1))
+            outward_weighted_features = outward_attention * outward_features
+            trg_features = node_features.index_select(0, trg_index)
+            inward_features = self.nonlinear(torch.cat([trg_features, edge_features], dim=-1))
+            inward_weighted_features = inward_attention * inward_features
 
             # batch size * max local entity, head size, out dim
             outward_new_features = self.graph_aggregate(outward_weighted_features, trg_index, num_of_nodes)

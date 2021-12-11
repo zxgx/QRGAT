@@ -51,7 +51,7 @@ class QAModel(nn.Module):
             for i in range(num_step):
                 layers.append(NSMLayer(
                     hidden_dim * num_dir, gat_head_dim, gat_head_size, hidden_dim, relation_dim, concat=True,
-                    dropout=gat_dropout, direction=direction, nonlinear=nn.ReLU(), skip=gat_skip
+                    dropout=gat_dropout, direction=direction, skip=gat_skip
                 ))
             self.entity_proj = nn.Linear(hidden_dim * num_dir, hidden_dim)
         elif graph_encoder_type == GraphEncType.MIX.name:
@@ -64,7 +64,7 @@ class QAModel(nn.Module):
                 ))
                 layers.append(NSMLayer(
                     gat_head_dim * gat_head_size * num_dir, gat_head_dim, gat_head_size, hidden_dim, relation_dim,
-                    concat=True, dropout=gat_dropout, direction=direction, nonlinear=nn.ELU(), skip=gat_skip
+                    concat=True, dropout=gat_dropout, direction=direction, skip=gat_skip
                 ))
             self.entity_proj = nn.Linear(gat_head_dim * gat_head_size * num_dir, hidden_dim)
         else:

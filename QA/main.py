@@ -13,7 +13,7 @@ from model import QAModel
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--seed', type=int, default=1020)
 
     # Dataset
     parser.add_argument('--dataset', type=str, required=True)
@@ -60,7 +60,7 @@ def parse_args():
 
 
 def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop, epochs, evaluate_every, model_path):
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
     # criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
 
     if decay_rate >= 1.:
