@@ -77,41 +77,56 @@ class NSMLayer(nn.Module):
         scores = self.leakyReLU(edge_features * self.edge_score_fn).sum(dim=-1)
         # print("org scores: %s" % scores[0, :5].tolist())
         if self.direction == 'outward':
-            activation = activation.view(-1, 1)  # batch size * max local entity, 1
-            # fact size, 1
-            prior = activation.index_select(0, src_index)
+            # fact size, head size, 1
+            outward_prior = prior.index_select(0, src_index).unsqueeze(2)
 
+            # node size, 1
+            activation = activation.view(-1, 1)
+            # fact size, 1
+            outward_neighbor = activation.index_select(0, src_index)
             # batch size * max local entity
-            next_activation = self.graph_aggregate(prior, trg_index, num_of_nodes).squeeze(1)
+            next_activation = self.graph_aggregate(outward_neighbor, trg_index, num_of_nodes).squeeze(1)
+            # batch size, max local entity
             next_activation = (next_activation.view(batch_size, max_local_entity) > 0).float()
 
             # fact size, head size, 1
-            attentions_per_edge = self.graph_attention(scores, src_index, num_of_nodes) * prior.unsqueeze(2)
-            # print("attention: %s" % attentions_per_edge[0, :5, 0].tolist())
-            # fact size, head size, out dim
-            weighted_features = attentions_per_edge * edge_features
+            outward_attention = self.graph_attention(scores, src_index, num_of_nodes) * outward_prior
 
-            # batch size * max local entity, head size, out dim
-            # These features should be very sparse
-            new_features = self.graph_aggregate(weighted_features, trg_index, num_of_nodes)
-            # print("new features: %s" % new_features[0, 0, :5].tolist())
+            # node size, head size, out dim
+            node_features = node_features.view(-1, self.num_of_head, self.num_out_features)
+            # fact size, head size, out dim
+            src_features = node_features.index_select(0, src_index)
+            outward_features = self.nonlinear(torch.cat([src_features, edge_features], dim=-1))
+            outward_weighted_features = outward_attention * outward_features
+
+            # node size, head size, out dim
+            new_features = self.graph_aggregate(outward_weighted_features, trg_index, num_of_nodes)
 
         elif self.direction == 'inward':
-            activation = activation.view(-1, 1)  # num nodes, 1
-            prior = activation.index_select(0, trg_index)  # fact size, 1
+            # fact size, head size, 1
+            inward_prior = prior.index_select(0, trg_index).unsqueeze(2)
 
+            # node size, 1
+            activation = activation.view(-1, 1)
+            # fact size, 1
+            inward_neighbor = activation.index_select(0, trg_index)
             # batch size * max local entity
-            next_activation = self.graph_aggregate(prior, src_index, num_of_nodes).squeeze(1)
+            next_activation = self.graph_aggregate(inward_neighbor, src_index, num_of_nodes).squeeze(1)
+            # batch size, max local entity
             next_activation = (next_activation.view(batch_size, max_local_entity) > 0).float()
 
             # fact size, head size, 1
-            attentions_per_edge = self.graph_attention(scores, trg_index, num_of_nodes) * prior.unsqueeze(2)
-            # print("attention: %s" % attentions_per_edge[0, :5, 0].tolist())
+            inward_attention = self.graph_attention(scores, trg_index, num_of_nodes) * inward_prior
+
+            # node size, head size, out dim
+            node_features = node_features.view(-1, self.num_of_head, self.num_out_features)
             # fact size, head size, out dim
-            weighted_features = attentions_per_edge * edge_features
+            trg_features = node_features.index_select(0, trg_index)
+            inward_features = self.nonlinear(torch.cat([trg_features, edge_features], dim=-1))
+            inward_weighted_features = inward_attention * inward_features
+
             # batch size * max local entity, head size, out dim
-            new_features = self.graph_aggregate(weighted_features, src_index, num_of_nodes)
-            # print("new features: %s" % new_features[0, 0, :5].tolist())
+            new_features = self.graph_aggregate(inward_weighted_features, src_index, num_of_nodes)
 
         else:
             # fact size, head size, 1
@@ -150,6 +165,7 @@ class NSMLayer(nn.Module):
             # print("outward new features: %s" % outward_new_features[0, 0, :5].tolist())
             inward_new_features = self.graph_aggregate(inward_weighted_features, src_index, num_of_nodes)
             # print("outward new features: %s" % inward_new_features[0, 0, :5].tolist())
+            # batch size * max local entity, head size, out dim * 2
             new_features = torch.cat([inward_new_features, outward_new_features], dim=2)
 
         if self.concat:

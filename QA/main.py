@@ -25,6 +25,8 @@ def parse_args():
     parser.add_argument('--question_dropout', type=float, default=0.3)
     parser.add_argument('--linear_dropout', type=float, default=0.2)
     parser.add_argument('--num_step', type=int, default=3)
+    parser.add_argument('--emb_entity', action='store_true')
+    parser.add_argument('--entity_dim', type=int, default=50)
     parser.add_argument('--relation_dim', type=int, default=200)
     parser.add_argument('--direction', type=str, default='all')
     parser.add_argument('--word_emb_path', type=str, default=None)
@@ -75,10 +77,11 @@ def train(train_data, dev_data, model, lr, weight_decay, decay_rate, early_stop,
         model.train()
         st, tot_loss = time.time(), 0.
         for batch in train_data.batching():
-            data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
+            data_id, question, question_mask, topic_label, candidate_entity, entity_mask, subgraph, answer_label, \
+                answer_list = batch
 
             # batch size, max local entity
-            scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+            scores = model((question, question_mask, topic_label, candidate_entity, entity_mask, subgraph))
 
             # smoothed cross entropy
             mask = torch.sum(answer_label, dim=1, keepdim=True)
@@ -128,10 +131,11 @@ def evaluate(model, data_loader, eps=0.95):
 
     with torch.no_grad():
         for batch in data_loader.batching():
-            data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list = batch
+            data_id, question, question_mask, topic_label, candidate_entity, entity_mask, subgraph, answer_label, \
+                answer_list = batch
 
             # batch size, max local entity
-            scores = model((question, question_mask, topic_label, entity_mask, subgraph))
+            scores = model((question, question_mask, topic_label, candidate_entity, entity_mask, subgraph))
             predict_dist = torch.softmax(scores, dim=1)
 
             for d_id, pred_dist, _q, t_dist, a_list in zip(data_id, predict_dist, question, topic_label, answer_list):
@@ -191,6 +195,8 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
+        if args.emb_entity:
+            torch.backends.cudnn.enabled = False
 
     start_time = time.time()
     dataset_dir = os.path.join('datasets', args.dataset)
@@ -248,13 +254,17 @@ def main():
     else:
         rel_emb = None
 
+    if args.emb_entity:
+        ent_size = len(ent2idx)
+    else:
+        ent_size = -1
     model = QAModel(
         word_size=tokenizer.num_token, word_dim=args.word_dim, hidden_dim=args.hidden_dim,
         question_dropout=args.question_dropout, linear_dropout=args.linear_dropout, num_step=args.num_step,
-        pretrained_emb=word_emb, relation_size=len(rel2idx), relation_dim=args.relation_dim,
-        pretrained_relation=rel_emb, direction=args.direction, graph_encoder_type=args.graph_encoder_type,
-        gat_head_dim=args.gat_head_dim, gat_head_size=args.gat_head_size,  gat_dropout=args.gat_dropout,
-        gat_skip=args.gat_skip, gat_bias=args.gat_bias,
+        pretrained_emb=word_emb, entity_size=ent_size, entity_dim=args.entity_dim, relation_size=len(rel2idx),
+        relation_dim=args.relation_dim, pretrained_relation=rel_emb, direction=args.direction,
+        graph_encoder_type=args.graph_encoder_type, gat_head_dim=args.gat_head_dim, gat_head_size=args.gat_head_size,
+        gat_dropout=args.gat_dropout, gat_skip=args.gat_skip, gat_bias=args.gat_bias,
     )
     print(model)
 

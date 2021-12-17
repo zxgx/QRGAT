@@ -81,6 +81,7 @@ class QADataset:
         self.question = np.zeros((self.num_data, self.max_seq_len), dtype=int)
         self.question_mask = np.zeros((self.num_data, self.max_seq_len), dtype=float)
         self.topic_label = np.zeros((self.num_data, self.max_local_entity), dtype=float)
+        self.candidate_entity = np.zeros((self.num_data, self.max_local_entity), dtype=int) + len(ent2idx)
         self.entity_mask = np.zeros((self.num_data, self.max_local_entity), dtype=float)
         self.subgraph = np.empty(self.num_data, dtype=object)
         self.answer_label = np.zeros((self.num_data, self.max_local_entity), dtype=float)
@@ -166,6 +167,7 @@ class QADataset:
 
             for g, l in g2l.items():
                 self.entity_mask[i, l] = 1
+                self.candidate_entity[i, l] = g
 
             head_list, rel_list, tail_list = [], [], []
             for head, rel, tail in each['subgraph']:
@@ -219,12 +221,14 @@ class QADataset:
             question = torch.tensor(self.question[batch_indices], dtype=torch.long).to(self.device)
             question_mask = torch.tensor(self.question_mask[batch_indices], dtype=torch.float).to(self.device)
             topic_label = torch.tensor(self.topic_label[batch_indices], dtype=torch.float).to(self.device)
+            candidate_entity = torch.tensor(self.candidate_entity[batch_indices], dtype=torch.long).to(self.device)
             entity_mask = torch.tensor(self.entity_mask[batch_indices], dtype=torch.float).to(self.device)
             subgraph = self.build_subgraph(data_id, batch_indices)
             answer_label = torch.tensor(self.answer_label[batch_indices], dtype=torch.float).to(self.device)
             answer_list = self.answer_list[batch_indices]
 
-            yield data_id, question, question_mask, topic_label, entity_mask, subgraph, answer_label, answer_list
+            yield (data_id, question, question_mask, topic_label, candidate_entity, entity_mask, subgraph, answer_label,
+                   answer_list)
 
     def build_subgraph(self, data_id, batch_indices):
         batch_heads, batch_tails, batch_ids = np.array([], dtype=int), np.array([], dtype=int), np.array([], dtype=int)

@@ -6,7 +6,7 @@ from modules import Instruction, EntityInit, GATLayer, NSMLayer, GraphEncType
 
 class QAModel(nn.Module):
     def __init__(self, word_size, word_dim, hidden_dim, question_dropout, linear_dropout, num_step, pretrained_emb,
-                 relation_size, relation_dim, pretrained_relation, direction, graph_encoder_type,
+                 entity_size, entity_dim, relation_size, relation_dim, pretrained_relation, direction, graph_encoder_type,
                  gat_head_dim, gat_head_size, gat_dropout, gat_skip, gat_bias):
         super(QAModel, self).__init__()
         assert direction in ('all', 'inward', 'outward')
@@ -22,6 +22,11 @@ class QAModel(nn.Module):
             self.word_embedding = nn.Embedding.from_pretrained(pretrained_emb, padding_idx=0, freeze=False)
         self.instruction_generator = Instruction(word_dim, hidden_dim, question_dropout, linear_dropout, num_step)
 
+        if entity_size > 0:
+            self.entity_embedding = nn.Embedding(entity_size+1, entity_dim, padding_idx=entity_size)
+            self.ent_linear = nn.Linear(entity_dim, hidden_dim * (2 if direction == 'all' else 1))
+        else:
+            self.entity_embedding = None
         #
         # Relation Embedding & Entity Encoder
         #
@@ -73,7 +78,7 @@ class QAModel(nn.Module):
         self.layers = nn.ModuleList(layers)
 
     def forward(self, batch):
-        question, question_mask, topic_label, entity_mask, subgraph = batch
+        question, question_mask, topic_label, candidate_entity, entity_mask, subgraph = batch
         batch_ids, batch_relations, edge_index = subgraph
 
         batch_size, max_local_entity = topic_label.shape
@@ -92,7 +97,10 @@ class QAModel(nn.Module):
         # print("Relation Embedding: %s" % fact_relations[0, :5].tolist())
 
         # batch size * max local entity, hidden dim * num dir
-        entity_emb = self.entity_encoder(fact_relations, edge_index, batch_size*max_local_entity)
+        if self.entity_embedding is None:
+            entity_emb = self.entity_encoder(fact_relations, edge_index, batch_size*max_local_entity)
+        else:
+            entity_emb = self.ent_linear(self.entity_embedding(candidate_entity).view(batch_size*max_local_entity, -1))
         # print("Entity Embedding: %s" % entity_emb[0, :5].tolist())
 
         for i in range(self.num_step):
