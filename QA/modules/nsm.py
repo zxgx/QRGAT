@@ -5,7 +5,7 @@ import numpy as np
 
 class NSMLayer(nn.Module):
     def __init__(self, num_in_features, num_out_features, num_of_head, hidden_dim, relation_dim, concat, dropout,
-                 direction, skip):
+                 direction, skip, attn_key, attn_value):
         super(NSMLayer, self).__init__()
         self.num_in_features = num_in_features
         self.num_of_head = num_of_head
@@ -28,7 +28,7 @@ class NSMLayer(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
         self.nonlinear = nn.Sequential(
-            nn.Linear(2*num_out_features, num_out_features),
+            nn.Linear(2*num_out_features if attn_value == 'rn' else num_out_features, num_out_features),
             nn.ReLU()
         )
         self.leakyReLU = nn.LeakyReLU(0.2)
@@ -36,6 +36,9 @@ class NSMLayer(nn.Module):
         self.layer_norm = nn.LayerNorm(num_in_features)
         self.score_fn = nn.Parameter(torch.Tensor(1, num_in_features))
         self.init_params()
+
+        self.key = attn_key
+        self.value = attn_value
 
     def init_params(self):
         nn.init.xavier_uniform_(self.instruction_linear_proj.weight)
@@ -62,6 +65,10 @@ class NSMLayer(nn.Module):
         node_features = nodes_proj * instruction_proj.unsqueeze(1)
         # batch size, max local entity, head size
         node_scores = self.leakyReLU(node_features * self.prior_score_fn).sum(dim=-1)
+        # fact size, head size
+        src_scores = node_scores.view(num_of_nodes, self.num_of_head).index_select(0, src_index)
+        trg_scores = node_scores.view(num_of_nodes, self.num_of_head).index_select(0, trg_index)
+        # batch size, max local entity, head size
         node_scores = node_scores * activation.unsqueeze(2) + (1 - activation.unsqueeze(2)) * -1e20
         # node size, head size
         prior = torch.softmax(node_scores, dim=1).view(num_of_nodes, self.num_of_head)
@@ -73,8 +80,18 @@ class NSMLayer(nn.Module):
         # print("projected edges: %s" % edges_proj[0, 0, :5].tolist())
         edge_features = edges_proj * instruction_proj
         # print("org features: %s" % features[0, 0, :5].tolist())
+
         # fact size, head size
-        scores = self.leakyReLU(edge_features * self.edge_score_fn).sum(dim=-1)
+        edge_scores = self.leakyReLU(edge_features * self.edge_score_fn).sum(dim=-1)
+        if self.key == 'r':
+            scores = edge_scores
+        elif self.key == 'en':
+            scores = src_scores + trg_scores
+        elif self.key == 'ern':
+            scores = src_scores + edge_scores + trg_scores
+        else:
+            raise KeyError("Undefined key: " + self.key)
+
         # print("org scores: %s" % scores[0, :5].tolist())
         if self.direction == 'outward':
             # fact size, head size, 1
@@ -154,10 +171,21 @@ class NSMLayer(nn.Module):
             node_features = node_features.view(-1, self.num_of_head, self.num_out_features)
             # fact size, head size, out dim
             src_features = node_features.index_select(0, src_index)
-            outward_features = self.nonlinear(torch.cat([src_features, edge_features], dim=-1))
-            outward_weighted_features = outward_attention * outward_features
             trg_features = node_features.index_select(0, trg_index)
-            inward_features = self.nonlinear(torch.cat([trg_features, edge_features], dim=-1))
+
+            if self.value == 'n':
+                outward_features = self.nonlinear(src_features)
+                inward_features = self.nonlinear(trg_features)
+            elif self.value == 'rn':
+                outward_features = self.nonlinear(torch.cat([src_features, edge_features], dim=-1))
+                inward_features = self.nonlinear(torch.cat([trg_features, edge_features], dim=-1))
+            elif self.value == 'r':
+                outward_features = self.nonlinear(edge_features)
+                inward_features = self.nonlinear(edge_features)
+            else:
+                raise KeyError("Undefined key: " + self.key)
+
+            outward_weighted_features = outward_attention * outward_features
             inward_weighted_features = inward_attention * inward_features
 
             # batch size * max local entity, head size, out dim

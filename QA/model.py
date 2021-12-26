@@ -7,7 +7,7 @@ from modules import Instruction, EntityInit, GATLayer, NSMLayer, GraphEncType
 class QAModel(nn.Module):
     def __init__(self, word_size, word_dim, hidden_dim, question_dropout, linear_dropout, num_step, pretrained_emb,
                  entity_size, entity_dim, relation_size, relation_dim, pretrained_relation, direction, graph_encoder_type,
-                 gat_head_dim, gat_head_size, gat_dropout, gat_skip, gat_bias):
+                 gat_head_dim, gat_head_size, gat_dropout, gat_skip, gat_bias, attn_key, attn_value):
         super(QAModel, self).__init__()
         assert direction in ('all', 'inward', 'outward')
         self.num_step = num_step
@@ -56,7 +56,7 @@ class QAModel(nn.Module):
             for i in range(num_step):
                 layers.append(NSMLayer(
                     hidden_dim * num_dir, gat_head_dim, gat_head_size, hidden_dim, relation_dim, concat=True,
-                    dropout=gat_dropout, direction=direction, skip=gat_skip
+                    dropout=gat_dropout, direction=direction, skip=gat_skip, attn_key=attn_key, attn_value=attn_value
                 ))
             self.entity_proj = nn.Linear(hidden_dim * num_dir, hidden_dim)
         elif graph_encoder_type == GraphEncType.MIX.name:

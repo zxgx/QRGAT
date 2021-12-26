@@ -39,6 +39,9 @@ def parse_args():
     parser.add_argument('--gat_skip', action='store_true')
     parser.add_argument('--gat_bias', action='store_true')
 
+    parser.add_argument('--attn_key', type=str, default='r')
+    parser.add_argument('--attn_value', type=str, default='rn')
+
     # Train & Eval
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--eval', action='store_true')
@@ -265,6 +268,7 @@ def main():
         relation_dim=args.relation_dim, pretrained_relation=rel_emb, direction=args.direction,
         graph_encoder_type=args.graph_encoder_type, gat_head_dim=args.gat_head_dim, gat_head_size=args.gat_head_size,
         gat_dropout=args.gat_dropout, gat_skip=args.gat_skip, gat_bias=args.gat_bias,
+        attn_key=args.attn_key, attn_value=args.attn_value
     )
     print(model)
 
