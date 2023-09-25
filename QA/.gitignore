@@ -1,0 +1,7 @@
+__pycache__/
+cache/
+datasets/CWQ/
+datasets/webqsp/
+
+*.out
+*.log

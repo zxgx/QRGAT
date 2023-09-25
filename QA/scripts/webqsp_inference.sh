@@ -1,3 +1,11 @@
+#!/bin/bash
+
+#SBATCH --account=liujin2
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=72:00:00
+#SBATCH --output=webqsp_infer.log
 
 # check the result for webqsp
 python -u main.py --eval --dataset webqsp \
