@@ -4,5 +4,6 @@ datasets/CWQ/
 datasets/webqsp/
 
 hugging_face_cache/
+
 *.out
 *.log
