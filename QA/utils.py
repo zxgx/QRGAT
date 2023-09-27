@@ -4,6 +4,8 @@ import random
 from nltk.tokenize import RegexpTokenizer
 import torch
 
+from transformers import PreTrainedTokenizerBase
+
 
 def get_dict(path):
     word2idx, idx2word = dict(), dict()
@@ -79,6 +81,8 @@ class QADataset:
 
         self.data_id = np.empty(self.num_data, dtype=object)
         self.question = np.zeros((self.num_data, self.max_seq_len), dtype=int)
+        if isinstance(tokenizer, PreTrainedTokenizerBase):
+            self.question += self.tokenizer.pad_token_id
         self.question_mask = np.zeros((self.num_data, self.max_seq_len), dtype=float)
         self.topic_label = np.zeros((self.num_data, self.max_local_entity), dtype=float)
         self.candidate_entity = np.zeros((self.num_data, self.max_local_entity), dtype=int) + len(ent2idx)
@@ -115,6 +119,8 @@ class QADataset:
                     each['question'] = self.tokenizer(idx2question[each['id']])
                 else:
                     each['question'] = self.tokenizer(' '.join(self.reg_tokenizer.tokenize(each['question'].lower())))
+                    if isinstance(self.tokenizer, PreTrainedTokenizerBase):
+                        each['question'] = each['question'].input_ids
                 self.max_seq_len = max(self.max_seq_len, len(each['question']))
 
                 data.append({

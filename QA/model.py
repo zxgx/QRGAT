@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from transformers import AutoModel
 
 from modules import Instruction, EntityInit, GATLayer, NSMLayer, GraphEncType
 
@@ -7,7 +8,8 @@ from modules import Instruction, EntityInit, GATLayer, NSMLayer, GraphEncType
 class QAModel(nn.Module):
     def __init__(self, word_size, word_dim, hidden_dim, question_dropout, linear_dropout, num_step, pretrained_emb,
                  entity_size, entity_dim, relation_size, relation_dim, pretrained_relation, direction, graph_encoder_type,
-                 gat_head_dim, gat_head_size, gat_dropout, gat_skip, gat_bias, attn_key, attn_value):
+                 gat_head_dim, gat_head_size, gat_dropout, gat_skip, gat_bias, attn_key, attn_value, 
+                 pretrained_model_name, hugging_face_cache):
         super(QAModel, self).__init__()
         assert direction in ('all', 'inward', 'outward')
         self.num_step = num_step
@@ -16,11 +18,17 @@ class QAModel(nn.Module):
         #
         # Question Encoder
         #
-        if pretrained_emb is None:
-            self.word_embedding = nn.Embedding(word_size, word_dim, padding_idx=0)
+        self.pretrained_model_name = pretrained_model_name
+        if pretrained_model_name is not None:
+            self.pretrained_model = AutoModel.from_pretrained(pretrained_model_name, cache_dir=hugging_face_cache)
+            # self.pretrained_model.requires_grad_(False)
         else:
-            self.word_embedding = nn.Embedding.from_pretrained(pretrained_emb, padding_idx=0, freeze=False)
-        self.instruction_generator = Instruction(word_dim, hidden_dim, question_dropout, linear_dropout, num_step)
+            if pretrained_emb is None:
+                self.word_embedding = nn.Embedding(word_size, word_dim, padding_idx=0)
+            else:
+                self.word_embedding = nn.Embedding.from_pretrained(pretrained_emb, padding_idx=0, freeze=False)
+        self.instruction_generator = Instruction(word_dim, hidden_dim, question_dropout, linear_dropout, num_step, 
+                                                 pretrained_model_name is not None)
 
         if entity_size > 0:
             self.entity_embedding = nn.Embedding(entity_size+1, entity_dim, padding_idx=entity_size)
@@ -83,14 +91,25 @@ class QAModel(nn.Module):
 
         batch_size, max_local_entity = topic_label.shape
 
-        # batch size, max seq len, word dim
-        question = self.word_embedding(question)
+        if self.pretrained_model_name is not None:
+            if 't5' in self.pretrained_model_name:
+                question = self.pretrained_model(
+                    input_ids=question, attention_mask=question_mask, 
+                    decoder_input_ids=question, decoder_attention_mask=question_mask
+                ).encoder_last_hidden_state
+            else:
+                question = self.pretrained_model(input_ids=question, attention_mask=question_mask).last_hidden_state
+        
+            instructions, question, _ = self.instruction_generator(question, question_mask)
+        else:
+            # batch size, max seq len, word dim
+            question = self.word_embedding(question)
 
-        # [ batch size, hidden dim ]
-        # batch size, 1, hidden dim
-        # [ batch size, max seq len ]
-        instructions, question, attentions = self.instruction_generator(question, question_mask)
-        # print("Question: %s" % question[0, 0, :5].tolist())
+            # [ batch size, hidden dim ]
+            # batch size, 1, hidden dim
+            # [ batch size, max seq len ]
+            instructions, question, attentions = self.instruction_generator(question, question_mask)
+            # print("Question: %s" % question[0, 0, :5].tolist())
 
         # fact size, relation dim
         fact_relations = self.rel_norm(self.relation_embedding(batch_relations))

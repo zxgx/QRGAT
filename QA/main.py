@@ -6,9 +6,15 @@ import random
 import torch
 import numpy as np
 
+from transformers import AutoTokenizer, AutoConfig
 from utils import get_dict, Tokenizer, QADataset
 from model import QAModel
 
+model_name_map = {
+    'BERT': 'bert-base-uncased', 
+    'XLNet': 'xlnet-base-cased', 
+    'T5': 'T5-base',
+}
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -60,6 +66,11 @@ def parse_args():
     # Log
     parser.add_argument('--checkpoint', type=str, default=None)
     parser.add_argument('--save_path', type=str, default=None)
+
+    # pretrained model
+    parser.add_argument('--pretrained_model_type', type=str, default=None, 
+                        choices=[None, 'BERT', 'XLNet', 'T5' ])
+    parser.add_argument('--hugging_face_cache', type=str, default='hugging_face_cache')
 
     return parser.parse_args()
 
@@ -212,8 +223,16 @@ def main():
 
     print("There are %d entities and %d relations" % (len(ent2idx), len(rel2idx)))
 
-    tokenizer = Tokenizer(os.path.join(dataset_dir, 'vocab.txt'))
-    print('Adopt pre-defined vocabulary of size: %d in tokenizer' % tokenizer.num_token)
+    pretrained_model_name = None if args.pretrained_model_type is None else model_name_map[args.pretrained_model_type]
+    if pretrained_model_name is None:
+        tokenizer = Tokenizer(os.path.join(dataset_dir, 'vocab.txt'))
+        print('Adopt pre-defined vocabulary of size: %d in tokenizer' % tokenizer.num_token)
+    else:
+        if not os.path.exists(args.hugging_face_cache):
+            os.makedirs(args.hugging_face_cache)
+        tokenizer = AutoTokenizer.from_pretrained(
+            pretrained_model_name, cache_dir=args.hugging_face_cache)
+        print(f'Adopt {pretrained_model_name} tokenizer with vocab size: {tokenizer}')
 
     # QA data splits
     train_data_path = os.path.join(dataset_dir, 'train_simple.json')
@@ -245,7 +264,7 @@ def main():
             tokenizer=tokenizer, batch_size=args.batch_size, training=False, device=device,
         )
 
-    if args.word_emb_path is not None:
+    if args.word_emb_path is not None and pretrained_model_name is None:
         word_emb_path = os.path.join(dataset_dir, args.word_emb_path)
         word_emb = torch.from_numpy(tokenizer.load_glove_emb(word_emb_path)).float()
     else:
@@ -261,14 +280,23 @@ def main():
         ent_size = len(ent2idx)
     else:
         ent_size = -1
+    if args.pretrained_model_type is None:
+        word_size = tokenizer.num_token
+        word_dim = args.word_dim
+    else:
+        config = AutoConfig.from_pretrained(
+            pretrained_model_name, cache_dir=args.hugging_face_cache)
+        word_size = None
+        word_dim = config.hidden_size
     model = QAModel(
-        word_size=tokenizer.num_token, word_dim=args.word_dim, hidden_dim=args.hidden_dim,
+        word_size=word_size, word_dim=word_dim, hidden_dim=args.hidden_dim,
         question_dropout=args.question_dropout, linear_dropout=args.linear_dropout, num_step=args.num_step,
         pretrained_emb=word_emb, entity_size=ent_size, entity_dim=args.entity_dim, relation_size=len(rel2idx),
         relation_dim=args.relation_dim, pretrained_relation=rel_emb, direction=args.direction,
         graph_encoder_type=args.graph_encoder_type, gat_head_dim=args.gat_head_dim, gat_head_size=args.gat_head_size,
         gat_dropout=args.gat_dropout, gat_skip=args.gat_skip, gat_bias=args.gat_bias,
-        attn_key=args.attn_key, attn_value=args.attn_value
+        attn_key=args.attn_key, attn_value=args.attn_value, 
+        pretrained_model_name=pretrained_model_name, hugging_face_cache=args.hugging_face_cache
     )
     print(model)
 
