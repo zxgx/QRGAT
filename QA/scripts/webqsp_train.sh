@@ -7,7 +7,7 @@
 #SBATCH --time=72:00:00
 #SBATCH --output=webqsp_train.log
 
-# check the result for webqsp
+# re-train from scratch
 python -u main.py --train --eval --dataset webqsp \
     --gat_skip --batch_size 32 --decay_rate 0.5 --direction all \
     --fact_dropout 0.0 --gat_dropout 0.0 --gat_head_dim 25 --gat_head_size 8 \

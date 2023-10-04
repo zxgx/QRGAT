@@ -7,7 +7,7 @@
 #SBATCH --time=72:00:00
 #SBATCH --output=cwq_train.log
 
-# check the result for CWQ
+# re-train from scratch
 python -u main.py --train --eval --dataset CWQ \
     --gat_skip --batch_size 24 --decay_rate 0.5 --direction all \
     --fact_dropout 0.0 --gat_dropout 0.0 --gat_head_dim 25 --gat_head_size 8 \

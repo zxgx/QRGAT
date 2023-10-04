@@ -7,7 +7,8 @@
 #SBATCH --time=72:00:00
 #SBATCH --output=webqsp_infer.log
 
-# check the result for webqsp
+# check the best result for webqsp
+# download the checkpoint before run this script
 python -u main.py --eval --dataset webqsp \
     --gat_skip --batch_size 32 --decay_rate 0.5 --direction all \
     --fact_dropout 0.0 --gat_dropout 0.0 --gat_head_dim 25 --gat_head_size 8 \

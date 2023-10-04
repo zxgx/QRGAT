@@ -21,7 +21,7 @@ class QAModel(nn.Module):
         self.pretrained_model_name = pretrained_model_name
         if pretrained_model_name is not None:
             self.pretrained_model = AutoModel.from_pretrained(pretrained_model_name, cache_dir=hugging_face_cache)
-            # self.pretrained_model.requires_grad_(False)
+            self.pretrained_model.requires_grad_(False)
         else:
             if pretrained_emb is None:
                 self.word_embedding = nn.Embedding(word_size, word_dim, padding_idx=0)

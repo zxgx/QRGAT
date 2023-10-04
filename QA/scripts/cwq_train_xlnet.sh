@@ -6,5 +6,5 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=72:00:00
 
-# check the result for webqsp
-python -u scripts/webqsp_experiment_t5.py
+# check the result for cwq
+python -u scripts/cwq_experiment_xlnet.py

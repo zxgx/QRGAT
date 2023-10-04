@@ -13,7 +13,7 @@ from model import QAModel
 model_name_map = {
     'BERT': 'bert-base-uncased', 
     'XLNet': 'xlnet-base-cased', 
-    'T5': 'T5-base',
+    'T5': 't5-base',
 }
 
 def parse_args():
@@ -246,6 +246,8 @@ def main():
     train_data, dev_data, test_data = None, None, None
     device = torch.device(args.device)
     if args.train:
+        # magic code to resolve segment fault
+        t1 = torch.LongTensor([1020]).cuda()
         if args.fine_tune:
             train_data_path = os.path.join(dataset_dir, 'finetune.json')
         train_data = QADataset(
