@@ -11,15 +11,22 @@ All the training logs for the experiments in the paper and the corresponding mod
 ## Commands and reproducing results
 All the commands are listed in the `scripts` directory. Before rerunning the training process, please make sure the pretrained data are downloaded and untared into `datasets` directory; before doing the inference, please make sure the model checkpoints are downloaded and untared into `cache` directory.
 
+Followers can rerun the training process by the shell scripts with `train` in their name, or reproduce the experiment results by scripts with `inference` in their name.
+
+
 ```
+git clone https://github.com/zxgx/QRGAT.git
+cd QRGAT
+
 # download the preprocessed data
 tar -zxf preprocessed_data.tgz -C <data_dir>
 cd datasets
 ln -s <data_dir>/CWQ CWQ
 ln -s <data_dir>/webqsp webqsp
+cd ..
 
 # download the model checkpoints
 tar -zxf qrgat.tgz -C cache
-```
 
-Followers can rerun the training process by the shell scripts with `train` in their name, or reproduce the experiment results by scripts with `inference` in their name.
+bash scripts/<any shell script>
+```
