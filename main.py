@@ -72,6 +72,9 @@ def parse_args():
                         choices=[None, 'BERT', 'XLNet', 'T5' ])
     parser.add_argument('--hugging_face_cache', type=str, default='hugging_face_cache')
 
+    # entity linking
+    parser.add_argument('--enable_entity_linking', action='store_true')
+
     return parser.parse_args()
 
 
@@ -190,10 +193,11 @@ def evaluate(model, data_loader, eps=0.95):
                     if precision > 0. and recall > 0.:
                         f1s += 2. / (1. / precision + 1. / recall)
 
-    hits /= data_loader.num_data
-    hits5 /= data_loader.num_data
-    hits10 /= data_loader.num_data
-    f1s /= data_loader.num_data
+    num_data = data_loader.full_size if data_loader.enable_entity_linking else data_loader.num_data
+    hits /= num_data
+    hits5 /= num_data
+    hits10 /= num_data
+    f1s /= num_data
     return hits, hits5, hits10, f1s
 
 
@@ -264,6 +268,7 @@ def main():
         test_data = QADataset(
             data_path=test_data_path, token_path=test_token_path, ent2idx=ent2idx, rel2idx=rel2idx,
             tokenizer=tokenizer, batch_size=args.batch_size, training=False, device=device,
+            enable_entity_linking=args.enable_entity_linking
         )
 
     if args.word_emb_path is not None and pretrained_model_name is None:

@@ -61,7 +61,7 @@ class Tokenizer:
 
 class QADataset:
     def __init__(self, data_path, ent2idx, rel2idx, tokenizer, batch_size, training, device,
-                 fact_dropout=0., token_path=None, label_smooth=0.):
+                 fact_dropout=0., token_path=None, label_smooth=0., enable_entity_linking=False):
         self.ent2idx = ent2idx
         self.rel2idx = rel2idx
         self.tokenizer = tokenizer
@@ -73,8 +73,15 @@ class QADataset:
         self.label_smooth = label_smooth
 
         self.max_seq_len = 0
-        data = self.load_data(data_path, token_path)
+        data, num_omit = self.load_data(data_path, token_path)
+        self.enable_entity_linking = enable_entity_linking
         self.num_data = len(data)
+        # when enable_entity_linking = False,
+        # full_size = num_data, (check this in log file)
+        # when enable_entity_linking = True,
+        # full_size > num_data,
+        # we use #num_data for training, use #full_size for evaluation
+        self.full_size = self.num_data + num_omit
 
         self.max_local_entity = 0
         self.global2local_maps = self.build_global2local_maps(data)
@@ -133,7 +140,7 @@ class QADataset:
                 })
         print('Read %d data from %s' % (len(data), data_path))
         print('Omit %d questions without any topic entity:\n%s' % (len(omitted), str(omitted)))
-        return data
+        return data, len(omitted)
 
     def build_global2local_maps(self, data):
         global2local, total_local_entity = {}, 0.
