@@ -30,3 +30,8 @@ tar -zxf qrgat.tgz -C cache
 
 bash scripts/<any shell script>
 ```
+
+# update on EL
+To get the results with entity linking (EL), we use the EL results from [RnG-KBQA](https://github.com/salesforce/rng-kbqa) for WebQSP.  
+The scripts to annotate our datasets with entity linking are in `datasets` dir.  
+To run this setup, please (1) replace the dataset softlink (explained below) with the downloaded dataset and (2) use `--enable_entity_linking`
