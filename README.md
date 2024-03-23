@@ -35,3 +35,15 @@ bash scripts/<any shell script>
 To get the results with entity linking (EL), we use the EL results from [RnG-KBQA](https://github.com/salesforce/rng-kbqa) for WebQSP.  
 The scripts to annotate our datasets with entity linking are in `datasets` dir.  
 To run this setup, please (1) replace the dataset softlink (explained below) with the downloaded dataset and (2) use `--enable_entity_linking`
+
+# Citation
+If you find this repository helpful, kindly cite:
+```
+@article{zhang2024question,
+  title={Question-Directed Reasoning With Relation-Aware Graph Attention Network for Complex Question Answering Over Knowledge Graph},
+  author={Zhang, Geng and Liu, Jin and Zhou, Guangyou and Zhao, Kunsong and Xie, Zhiwen and Huang, Bo},
+  journal={IEEE/ACM Transactions on Audio, Speech, and Language Processing},
+  year={2024},
+  publisher={IEEE}
+}
+```
